@@ -1,0 +1,25 @@
+.env
+.inspection-copilot-pids.json
+backups/
+logs/
+tmps*/
+__pycache__/
+*.pyc
+inspection-ui/node_modules/
+inspection-ui/dist/
+users/local_user/pilot_config.json
+
+# Local/runtime data
+clean-test-venv/
+issue_photos/
+saved_sessions/
+temp_uploads/
+users/
+
+# Python virtual environments
+venv/
+.venv/
+
+# Build artifacts
+dist/
+build/

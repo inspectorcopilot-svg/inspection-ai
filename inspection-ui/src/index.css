@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .dark .bg-white {
+    background-color: rgb(15 23 42);
+  }
+
+  .dark .bg-white\/70,
+  .dark .bg-white\/80 {
+    background-color: rgb(30 41 59 / 0.88);
+  }
+
+  .dark .bg-slate-50 {
+    background-color: rgb(30 41 59);
+  }
+
+  .dark .bg-slate-100 {
+    background-color: rgb(51 65 85);
+  }
+
+  .dark .text-slate-900,
+  .dark .text-slate-800,
+  .dark .text-slate-700,
+  .dark .text-slate-600 {
+    color: rgb(226 232 240);
+  }
+
+  .dark .text-slate-500,
+  .dark .text-slate-400 {
+    color: rgb(148 163 184);
+  }
+
+  .dark .border-slate-200,
+  .dark .border-slate-300 {
+    border-color: rgb(71 85 105);
+  }
+
+  .dark .bg-blue-50,
+  .dark .bg-blue-100 {
+    background-color: rgb(30 58 138 / 0.35);
+  }
+
+  .dark .bg-green-50,
+  .dark .bg-green-100 {
+    background-color: rgb(20 83 45 / 0.4);
+  }
+
+  .dark .bg-yellow-50,
+  .dark .bg-yellow-100 {
+    background-color: rgb(113 63 18 / 0.42);
+  }
+
+  .dark .bg-red-50,
+  .dark .bg-red-100 {
+    background-color: rgb(127 29 29 / 0.42);
+  }
+
+  .dark .bg-purple-50,
+  .dark .bg-purple-100 {
+    background-color: rgb(88 28 135 / 0.38);
+  }
+
+  .dark input,
+  .dark select,
+  .dark textarea {
+    background-color: rgb(30 41 59);
+    color: rgb(226 232 240);
+  }
+}
