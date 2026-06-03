@@ -310,6 +310,9 @@ class LoginRequest(BaseModel):
 class SessionCreateRequest(BaseModel):
     inspection_title: Optional[str] = None
 
+class SessionTitleRequest(BaseModel):
+    inspection_title: str
+
 class SettingsRequest(BaseModel):
     inspector_name: Optional[str] = ""
     default_mode: Optional[str] = "inspection"
@@ -367,6 +370,35 @@ def persist_session(session_id: str):
 @app.post("/workflow/session/{session_id}/save")
 def save_session(session_id: str):
     return persist_session(session_id)
+
+
+@app.post("/workflow/session/{session_id}/title")
+def update_session_title(session_id: str, payload: SessionTitleRequest):
+    """Update the active inspection session label used for save/load lists."""
+
+    inspection_title = (
+        payload.inspection_title.strip()
+        if payload and payload.inspection_title
+        else "Untitled Inspection"
+    )
+
+    try:
+        session = workflow.get_session(session_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail="Inspection session no longer exists in memory. Create or load a session first."
+        )
+
+    session.inspection_title = inspection_title
+    saved = persist_session(session_id)
+
+    return {
+        "updated": True,
+        "session_id": session_id,
+        "inspection_title": inspection_title,
+        "saved_at": saved["saved_at"],
+    }
 
 
 @app.get("/workflow/sessions")

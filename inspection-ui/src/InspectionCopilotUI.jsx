@@ -107,7 +107,7 @@ const TUTORIAL_STORAGE_KEY = "inspection-copilot-tutorial-complete"
 const TUTORIAL_STEPS = [
   {
     title: "Welcome to Inspection Co-Pilot",
-    body: "This app assists your inspection workflow. You stay in control of every finding. The walkthrough is optional and can be replayed later from Profile > Help.",
+    body: "This app assists your inspection workflow. You stay in control of every finding. The walkthrough is optional and can be replayed later from Settings.",
   },
   {
     title: "Start a Titled Inspection",
@@ -158,6 +158,8 @@ const [mode, setMode] = useState("inspection")
 // Current backend inspection session.
 const [sessionId, setSessionId] = useState(null)
 const [inspectionTitle, setInspectionTitle] = useState("Untitled Inspection")
+const [inspectionTitleDraft, setInspectionTitleDraft] = useState("Untitled Inspection")
+const [titleSaving, setTitleSaving] = useState(false)
 const [newInspectionTitle, setNewInspectionTitle] = useState("")
 const [showNewInspectionPanel, setShowNewInspectionPanel] = useState(false)
 
@@ -497,6 +499,10 @@ const [settings, setSettings] = useState({
     recognitionRef.current = recognition
   }, [autoSubmitVoice, mode, settings.voice_language])
 
+  useEffect(() => {
+    setInspectionTitleDraft(inspectionTitle)
+  }, [inspectionTitle])
+
 
   /*****************************************************************/
   /* 7. COMPUTED VALUES */
@@ -598,6 +604,8 @@ const [settings, setSettings] = useState({
     allAttachedPhotosReviewed,
   ])
 
+  const reviewComplete = mode === "review" && issues.length === 0
+
   const filteredSavedSessions = useMemo(() => {
     const search = savedSessionSearch.trim().toLowerCase()
 
@@ -672,6 +680,49 @@ const [settings, setSettings] = useState({
     const data = await res.json()
     setSessionId(data.session_id)
     setInspectionTitle(data.inspection_title || title)
+    setInspectionTitleDraft(data.inspection_title || title)
+  }
+
+  // Renames the current working inspection session label.
+  const updateInspectionTitle = async () => {
+    const nextTitle = inspectionTitleDraft.trim() || "Untitled Inspection"
+
+    setInspectionTitle(nextTitle)
+    setInspectionTitleDraft(nextTitle)
+
+    if (!sessionIdRef.current) return
+
+    try {
+      setTitleSaving(true)
+
+      const response = await fetch(
+        `${API_BASE}/workflow/session/${sessionIdRef.current}/title`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inspection_title: nextTitle,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error("Title update failed")
+      }
+
+      const data = await response.json()
+      setInspectionTitle(data.inspection_title || nextTitle)
+      setInspectionTitleDraft(data.inspection_title || nextTitle)
+      setSaveStatus("Saved")
+      setLastSavedAt(data.saved_at || new Date().toISOString())
+      await loadSavedSessions()
+    } catch {
+      setCopilotMessage("Could not update the inspection title. Try Save from the menu.")
+    } finally {
+      setTitleSaving(false)
+    }
   }
 
   // Starts a clean workflow session with an inspector-friendly title.
@@ -1455,6 +1506,12 @@ const isPhotoRequiredBeforeApproval = (issue) => {
   const completeInspection = async () => {
     if (!sessionIdRef.current) return
 
+    if (issues.length > 0) {
+      setMode("review")
+      setCopilotMessage("Review all pending findings before generating copy/paste blocks.")
+      return
+    }
+
     setMode("complete")
 
     const coverageRes = await fetch(
@@ -1472,7 +1529,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     setReportBlocks(reportData.report_blocks || [])
 
     setCopilotMessage(
-      "Inspection completion screen active. Review coverage and copy approved report blocks."
+      "Copy/paste blocks are ready. Review coverage and copy approved finding text when ready."
     )
   }
 
@@ -1698,10 +1755,10 @@ const isPhotoRequiredBeforeApproval = (issue) => {
   /* 17. COPY / EXPORT UTILITIES */
   /*****************************************************************/
 
-  // Copies a report narrative block to clipboard.
+  // Copies an approved finding block to clipboard.
   const copyBlock = async (block) => {
     await navigator.clipboard.writeText(block)
-    setCopilotMessage("Report block copied to clipboard.")
+    setCopilotMessage("Copy/paste block copied to clipboard.")
   }
 
 
@@ -1755,6 +1812,16 @@ const isPhotoRequiredBeforeApproval = (issue) => {
 
   // Controls the color styling of the main co-pilot response panel.
   const activeLevel = activeIssue?.priority_level || "LOW"
+  const primaryButtonClass =
+    "min-h-11 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
+  const secondaryButtonClass =
+    "min-h-11 rounded-2xl bg-slate-200 px-4 py-3 text-sm font-bold text-slate-900 shadow-sm transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+  const compactPrimaryButtonClass =
+    "rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
+  const compactSecondaryButtonClass =
+    "rounded-xl bg-slate-200 px-4 py-2 text-sm font-bold text-slate-900 shadow-sm transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+  const dangerButtonClass =
+    "min-h-11 rounded-2xl bg-red-700 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-red-800"
 
 
   /*****************************************************************/
@@ -2046,8 +2113,8 @@ const renderPhotoGalleryPanel = () => (
       />
 
     {!isAuthenticated && (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
-        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6 dark:bg-slate-950">
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <h1 className="text-3xl font-bold text-slate-900">
             Inspection Co-Pilot
           </h1>
@@ -2073,7 +2140,7 @@ const renderPhotoGalleryPanel = () => (
                 autoComplete="username"
                 value={loginUsername}
                 onChange={(event) => setLoginUsername(event.target.value)}
-                className="mt-2 w-full rounded-2xl border border-slate-300 p-3 outline-none focus:ring-2 focus:ring-slate-400"
+                className="mt-2 w-full rounded-2xl border border-slate-300 bg-white p-3 outline-none focus:ring-2 focus:ring-blue-400 dark:border-slate-700 dark:bg-slate-800"
                 placeholder="username"
               />
             </label>
@@ -2089,7 +2156,7 @@ const renderPhotoGalleryPanel = () => (
                 autoComplete="current-password"
                 value={loginPassword}
                 onChange={(event) => setLoginPassword(event.target.value)}
-                className="mt-2 w-full rounded-2xl border border-slate-300 p-3 outline-none focus:ring-2 focus:ring-slate-400"
+                className="mt-2 w-full rounded-2xl border border-slate-300 bg-white p-3 outline-none focus:ring-2 focus:ring-blue-400 dark:border-slate-700 dark:bg-slate-800"
                 placeholder="password"
               />
             </label>
@@ -2102,7 +2169,7 @@ const renderPhotoGalleryPanel = () => (
 
             <button
               type="submit"
-              className="w-full rounded-2xl bg-slate-900 py-4 text-lg font-bold text-white hover:bg-slate-800"
+              className="w-full rounded-2xl bg-blue-700 py-4 text-lg font-bold text-white hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500"
             >
               Login
             </button>
@@ -2122,9 +2189,26 @@ const renderPhotoGalleryPanel = () => (
             <p className="mt-1 hidden text-sm text-slate-500 sm:block">
               Inspection Mode → Review Mode → Copy/Paste Blocks
             </p>
-            <p className="mt-2 text-sm font-bold text-slate-700">
-              {inspectionTitle}
-            </p>
+            <label className="mt-3 block max-w-xl">
+              <span className="sr-only">Inspection title</span>
+              <input
+                value={inspectionTitleDraft}
+                onChange={(event) => setInspectionTitleDraft(event.target.value)}
+                onBlur={updateInspectionTitle}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur()
+                  }
+                }}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:bg-slate-800"
+                aria-label="Inspection title"
+              />
+              {titleSaving && (
+                <span className="mt-1 block text-xs font-semibold text-slate-500">
+                  Saving title...
+                </span>
+              )}
+            </label>
 
           </div>
 
@@ -2133,8 +2217,8 @@ const renderPhotoGalleryPanel = () => (
               onClick={() => setMode("inspection")}
               className={`rounded-full px-4 py-2 text-sm font-bold ${
                 mode === "inspection"
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-100 text-slate-700"
+                  ? "bg-blue-700 text-white dark:bg-blue-600"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100"
               }`}
             >
               Inspect
@@ -2144,8 +2228,8 @@ const renderPhotoGalleryPanel = () => (
               onClick={enterReviewMode}
               className={`rounded-full px-4 py-2 text-sm font-bold ${
                 mode === "review"
-                  ? "bg-orange-600 text-white"
-                  : "bg-slate-100 text-slate-700"
+                  ? "bg-blue-700 text-white dark:bg-blue-600"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100"
               }`}
             >
               Review
@@ -2153,18 +2237,19 @@ const renderPhotoGalleryPanel = () => (
 
             <button
               onClick={completeInspection}
+              disabled={mode !== "complete" && !reviewComplete}
               className={`rounded-full px-4 py-2 text-sm font-bold ${
                 mode === "complete"
-                  ? "bg-green-600 text-white"
-                  : "bg-slate-100 text-slate-700"
-              }`}
+                  ? "bg-blue-700 text-white dark:bg-blue-600"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+              } disabled:cursor-not-allowed disabled:opacity-50`}
             >
               Complete
             </button>
 
             <button
               onClick={() => setShowNewInspectionPanel(true)}
-              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+              className="rounded-full bg-blue-700 px-4 py-2 text-sm font-bold text-white dark:bg-blue-600"
             >
               New Inspection
             </button>
@@ -2202,19 +2287,10 @@ const renderPhotoGalleryPanel = () => (
 
                 <button
                   onClick={() => {
-                    showMobilePanel("profile")
-                  }}
-                  className="mt-2 w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
-                >
-                  Profile
-                </button>
-
-                <button
-                  onClick={() => {
                     saveSession(false)
                     setShowProfileMenu(false)
                   }}
-                  className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
+                  className="mt-2 w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
                 >
                   Save
                 </button>
@@ -2235,13 +2311,6 @@ const renderPhotoGalleryPanel = () => (
                   className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
                 >
                   Settings
-                </button>
-
-                <button
-                  onClick={startTutorial}
-                  className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
-                >
-                  Help
                 </button>
 
                 <button
@@ -2269,51 +2338,59 @@ const renderPhotoGalleryPanel = () => (
 
               <button
                 onClick={closeMobilePanels}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+                className={compactSecondaryButtonClass}
               >
                 Close
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
+              <button
+                onClick={() => {
+                  closeMobilePanels()
+                  setShowNewInspectionPanel(true)
+                  window.scrollTo({ top: 0, behavior: "smooth" })
+                }}
+                className={primaryButtonClass}
+              >
+                New Inspection
+              </button>
+
+              <button
+                onClick={() => {
+                  saveSession(false)
+                  closeMobilePanels()
+                }}
+                disabled={!sessionId}
+                className={primaryButtonClass}
+              >
+                Save
+              </button>
+
               <button
                 onClick={() => showMobilePanel("settings")}
-                className="min-h-11 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                className={secondaryButtonClass}
               >
                 Settings
               </button>
 
               <button
-                onClick={() => showMobilePanel("profile")}
-                className="min-h-11 rounded-2xl bg-slate-800 px-4 py-3 text-sm font-bold text-white shadow-sm dark:bg-slate-200 dark:text-slate-950"
-              >
-                Profile
-              </button>
-
-              <button
                 onClick={() => showMobilePanel("load")}
-                className="min-h-11 rounded-2xl bg-indigo-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                className={secondaryButtonClass}
               >
                 Load / Restore
               </button>
 
               <button
                 onClick={() => showMobilePanel("gallery")}
-                className="min-h-11 rounded-2xl bg-teal-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                className={secondaryButtonClass}
               >
                 Photo Gallery
               </button>
 
               <button
-                onClick={() => showMobilePanel("help")}
-                className="min-h-11 rounded-2xl bg-purple-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
-              >
-                Help / Voice
-              </button>
-
-              <button
                 onClick={logout}
-                className="min-h-11 rounded-2xl bg-red-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                className={dangerButtonClass}
               >
                 Logout
               </button>
@@ -2326,7 +2403,7 @@ const renderPhotoGalleryPanel = () => (
             <div className="mb-3 flex justify-end">
               <button
                 onClick={closeMobilePanels}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+                className={compactSecondaryButtonClass}
               >
                 Back to Inspect
               </button>
@@ -2335,7 +2412,7 @@ const renderPhotoGalleryPanel = () => (
           </div>
         )}
 
-        {activeMobilePanel === "help" && (
+        {false && activeMobilePanel === "help" && (
           <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:hidden">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
@@ -2379,7 +2456,7 @@ const renderPhotoGalleryPanel = () => (
                   setNewInspectionTitle("")
                   setShowNewInspectionPanel(false)
                 }}
-                className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700"
+                className={compactSecondaryButtonClass}
               >
                 Cancel
               </button>
@@ -2401,7 +2478,7 @@ const renderPhotoGalleryPanel = () => (
               <button
                 onClick={startNewInspection}
                 disabled={!newInspectionTitle.trim()}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50"
+                className={primaryButtonClass}
               >
                 Start Inspection
               </button>
@@ -2433,7 +2510,7 @@ const renderPhotoGalleryPanel = () => (
                   setShowProfilePanel(false)
                   setActiveMobilePanel(null)
                 }}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+                className={compactSecondaryButtonClass}
               >
                 Close
               </button>
@@ -2598,7 +2675,7 @@ const renderPhotoGalleryPanel = () => (
                   setShowSettingsPanel(false)
                   setActiveMobilePanel(null)
                 }}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+                className={compactSecondaryButtonClass}
               >
                 Close
               </button>
@@ -2609,6 +2686,42 @@ const renderPhotoGalleryPanel = () => (
                 {settingsStatus}
               </div>
             )}
+
+            <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Profile
+                </p>
+                <div className="mt-3 flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-lg font-black uppercase text-white dark:bg-slate-200 dark:text-slate-950">
+                    {inspectorDisplayName.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-900">
+                      {inspectorDisplayName}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      Local inspection profile
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Help / Voice Commands
+                </p>
+                <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Try: "move to garage", "inspecting electrical panel", "take photo", "start review", or "finish inspection".
+                </p>
+                <button
+                  onClick={startTutorial}
+                  className={`mt-4 w-full ${primaryButtonClass}`}
+                >
+                  Replay Walkthrough
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 p-4">
@@ -2857,7 +2970,7 @@ const renderPhotoGalleryPanel = () => (
               <button
                 onClick={loadSettings}
                 disabled={settingsLoading}
-                className="rounded-xl bg-slate-100 px-5 py-3 text-sm font-bold text-slate-700 disabled:opacity-50"
+                className={compactSecondaryButtonClass}
               >
                 Reload
               </button>
@@ -2865,7 +2978,7 @@ const renderPhotoGalleryPanel = () => (
               <button
                 onClick={saveSettings}
                 disabled={settingsLoading}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50"
+                className={compactPrimaryButtonClass}
               >
                 {settingsLoading ? "Saving..." : "Save Settings"}
               </button>
@@ -3006,7 +3119,7 @@ const renderPhotoGalleryPanel = () => (
                       className={`rounded-2xl py-4 text-lg font-bold transition ${
                         isListening
                           ? "bg-red-600 text-white"
-                          : "bg-blue-600 text-white hover:bg-blue-700"
+                          : "bg-slate-200 text-slate-900 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
                       } disabled:cursor-not-allowed disabled:opacity-50`}
                     >
                       {isListening ? "🛑 Stop Listening" : "🎤 Speak"}
@@ -3015,7 +3128,7 @@ const renderPhotoGalleryPanel = () => (
                     <button
                       onClick={() => submitObservation()}
                       disabled={loading || !sessionId || !observation.trim()}
-                      className="rounded-2xl bg-slate-900 py-4 text-lg font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-2xl bg-blue-700 py-4 text-lg font-bold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
                     >
                       {loading ? "Analyzing..." : "Submit Observation"}
                     </button>
@@ -3262,6 +3375,23 @@ const renderPhotoGalleryPanel = () => (
                   </div>
                 )}
 
+                {reviewComplete && (
+                  <div className="mt-5 rounded-2xl border border-slate-200 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-800/80">
+                    <p className="font-bold text-slate-900">
+                      Review complete
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-600">
+                      No pending findings remain. Create approved copy/paste blocks for outside report software.
+                    </p>
+                    <button
+                      onClick={completeInspection}
+                      className={`mt-4 w-full ${primaryButtonClass}`}
+                    >
+                      Generate Copy/Paste Blocks
+                    </button>
+                  </div>
+                )}
+
                 {activeIssue && (
                   <div className="mt-5 flex flex-wrap gap-3">
                     <button
@@ -3308,7 +3438,7 @@ const renderPhotoGalleryPanel = () => (
                     {mode === "inspection" && (
                       <button
                         onClick={enterReviewMode}
-                        className="rounded-xl bg-orange-600 px-4 py-3 text-sm font-bold text-white shadow-sm"
+                        className={compactPrimaryButtonClass}
                       >
                         Start Review
                       </button>
@@ -3323,7 +3453,7 @@ const renderPhotoGalleryPanel = () => (
               <>
                 <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
                   <h2 className="text-2xl font-bold text-slate-900">
-                    Complete Inspection
+                    Approved Copy/Paste Blocks
                   </h2>
                   <p className="mt-2 text-slate-600">
                     Coverage review and approved copy/paste blocks are ready.
@@ -3471,19 +3601,23 @@ const renderPhotoGalleryPanel = () => (
             {mode !== "complete" && (
               <div className="rounded-3xl bg-slate-900 p-4 text-white shadow-sm sm:p-6">
                 <h2 className="text-xl font-bold">
-                  {mode === "inspection" ? "Finish Inspection" : "Complete Review"}
+                  {mode === "inspection" ? "Finish Inspection" : "Review Findings"}
                 </h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
                   {mode === "inspection"
                     ? "Move to review mode and approve findings when ready."
-                    : "Generate coverage review and copy/paste blocks."}
+                    : issues.length === 0
+                      ? "Review is complete. Generate approved copy/paste blocks."
+                      : "Work through the review queue before creating copy/paste blocks."}
                 </p>
 
                 <button
                   onClick={mode === "inspection" ? enterReviewMode : completeInspection}
-                  className="mt-5 w-full rounded-2xl bg-white py-4 font-bold text-slate-900 transition hover:bg-slate-100"
+                  className={`mt-5 w-full rounded-2xl bg-white py-4 font-bold text-slate-900 transition hover:bg-slate-100 ${
+                    mode === "review" && issues.length > 0 ? "hidden" : ""
+                  }`}
                 >
-                  {mode === "inspection" ? "Start Review" : "🏁 Complete Inspection"}
+                  {mode === "inspection" ? "Start Review" : "Generate Copy/Paste Blocks"}
                 </button>
               </div>
             )}
@@ -3605,18 +3739,7 @@ const renderPhotoGalleryPanel = () => (
 
         {/* Mobile field toolbar: keeps primary workflow actions thumb-friendly. */}
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:hidden">
-          <div className="mx-auto grid max-w-md grid-cols-4 gap-2">
-            <button
-              onClick={() => {
-                setShowNewInspectionPanel(true)
-                setActiveMobilePanel(null)
-                window.scrollTo({ top: 0, behavior: "smooth" })
-              }}
-              className="min-h-11 rounded-xl bg-slate-900 px-1 py-3 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-950"
-            >
-              New
-            </button>
-
+          <div className="mx-auto grid max-w-md grid-cols-3 gap-2">
             <button
               onClick={() => {
                 setMode("inspection")
@@ -3624,7 +3747,7 @@ const renderPhotoGalleryPanel = () => (
               }}
               className={`rounded-xl px-1 py-3 text-xs font-bold ${
                 mode === "inspection"
-                  ? "bg-blue-600 text-white"
+                  ? "bg-blue-700 text-white dark:bg-blue-600"
                   : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100"
               }`}
             >
@@ -3638,7 +3761,7 @@ const renderPhotoGalleryPanel = () => (
               }}
               className={`rounded-xl px-1 py-3 text-xs font-bold ${
                 mode === "review"
-                  ? "bg-orange-600 text-white"
+                  ? "bg-blue-700 text-white dark:bg-blue-600"
                   : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100"
               }`}
             >
@@ -3646,11 +3769,14 @@ const renderPhotoGalleryPanel = () => (
             </button>
 
             <button
-              onClick={() => saveSession(false)}
-              disabled={!sessionId}
-              className="min-h-11 rounded-xl bg-green-700 px-1 py-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
+              onClick={() => showMobilePanel("menu")}
+              className={`rounded-xl px-1 py-3 text-xs font-bold ${
+                activeMobilePanel === "menu"
+                  ? "bg-blue-700 text-white dark:bg-blue-600"
+                  : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100"
+              }`}
             >
-              Save
+              Menu
             </button>
           </div>
         </nav>
@@ -3699,12 +3825,12 @@ const renderPhotoGalleryPanel = () => (
                 </button>
 
                 {tutorialStep === TUTORIAL_STEPS.length - 1 ? (
-                  <button
-                    onClick={completeTutorial}
-                    className="rounded-xl bg-green-600 px-5 py-3 text-sm font-bold text-white"
-                  >
-                    Finish
-                  </button>
+                <button
+                  onClick={completeTutorial}
+                  className={compactPrimaryButtonClass}
+                >
+                  Finish
+                </button>
                 ) : (
                   <button
                     onClick={() => setTutorialStep((current) => current + 1)}
