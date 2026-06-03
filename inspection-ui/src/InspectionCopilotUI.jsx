@@ -103,6 +103,15 @@ const badgeStyles = {
 }
 
 const TUTORIAL_STORAGE_KEY = "inspection-copilot-tutorial-complete"
+const AUTH_STORAGE_KEY = "inspection-copilot-local-auth"
+
+const readStoredAuth = () => {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null")
+  } catch {
+    return null
+  }
+}
 
 const TUTORIAL_STEPS = [
   {
@@ -144,6 +153,7 @@ const TUTORIAL_STEPS = [
 /*****************************************************************/
 
 export default function InspectionCopilotUI() {
+const storedAuth = readStoredAuth()
 
 
 /*****************************************************************/
@@ -240,11 +250,11 @@ const [isOnline, setIsOnline] = useState(navigator.onLine)
 /*****************************************************************/
 
 // Local login state. Later this can become real token-based auth.
-const [isAuthenticated, setIsAuthenticated] = useState(false)
+const [isAuthenticated, setIsAuthenticated] = useState(Boolean(storedAuth?.authenticated))
 const [loginUsername, setLoginUsername] = useState("")
 const [loginPassword, setLoginPassword] = useState("")
 const [loginError, setLoginError] = useState("")
-const [currentUser, setCurrentUser] = useState(null)
+const [currentUser, setCurrentUser] = useState(storedAuth?.username || null)
 const [showProfileMenu, setShowProfileMenu] = useState(false)
 const [showProfilePanel, setShowProfilePanel] = useState(false)
 const [tutorialStep, setTutorialStep] = useState(null)
@@ -409,9 +419,22 @@ const [settings, setSettings] = useState({
   }, [activeIssue])
 
 
-  // Create a new backend inspection session when the app first loads.
+  // Create or restore the backend inspection session when the app first loads.
   useEffect(() => {
-    createSession()
+    const initializeSession = async () => {
+      if (storedAuth?.authenticated && storedAuth?.session_id) {
+        const restored = await loadSession(
+          storedAuth.session_id,
+          "Inspection session restored."
+        )
+
+        if (restored) return
+      }
+
+      await createSession(storedAuth?.inspection_title || "Untitled Inspection")
+    }
+
+    initializeSession()
   }, [])
 
 
@@ -424,6 +447,20 @@ const [settings, setSettings] = useState({
 
     loadSavedSessions(true)
   }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    localStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({
+        authenticated: true,
+        username: currentUser || "local_user",
+        session_id: sessionId,
+        inspection_title: inspectionTitle,
+      })
+    )
+  }, [isAuthenticated, currentUser, sessionId, inspectionTitle])
 
 
   /*****************************************************************/
@@ -605,6 +642,29 @@ const [settings, setSettings] = useState({
   ])
 
   const reviewComplete = mode === "review" && issues.length === 0
+
+  const approvedIssues = useMemo(() => {
+    return allIssues.filter((issue) => issue.status === "approved")
+  }, [allIssues])
+
+  const approvedCopyBlocks = useMemo(() => {
+    if (reportBlocks.length > 0) {
+      return reportBlocks.map((block, index) => ({
+        block,
+        issue: approvedIssues[index] || null,
+      }))
+    }
+
+    return approvedIssues
+      .map((issue) => ({
+        issue,
+        block:
+          issue.professional_finding ||
+          issue.finding ||
+          "Approved finding text unavailable.",
+      }))
+      .filter((item) => item.block.trim())
+  }, [approvedIssues, reportBlocks])
 
   const filteredSavedSessions = useMemo(() => {
     const search = savedSessionSearch.trim().toLowerCase()
@@ -1276,6 +1336,18 @@ const [settings, setSettings] = useState({
       return
     }
 
+    if (isAuthenticated) {
+      localStorage.setItem(
+        AUTH_STORAGE_KEY,
+        JSON.stringify({
+          authenticated: true,
+          username: currentUser || "local_user",
+          session_id: sessionIdRef.current,
+          inspection_title: inspectionTitle,
+        })
+      )
+    }
+
     photoInputRef.current?.click()
   }
 
@@ -1299,6 +1371,10 @@ const [settings, setSettings] = useState({
         body: formData,
       })
 
+      if (!res.ok) {
+        throw new Error("Photo upload failed")
+      }
+
       const data = await res.json()
       markWorkflowSaved()
 
@@ -1316,6 +1392,10 @@ const [settings, setSettings] = useState({
           `Photo attached. ${data.photo_count} photo(s) now linked to this finding.`
         )
       }
+    } catch {
+      setCopilotMessage(
+        "Photo upload failed. You are still logged in; try attaching the photo again."
+      )
     } finally {
       setPhotoUploading(false)
       event.target.value = ""
@@ -1635,7 +1715,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
       const data = await response.json()
 
       if (!data.loaded) {
-        return
+        return false
       }
 
       const loaded = data.session
@@ -1679,10 +1759,12 @@ const isPhotoRequiredBeforeApproval = (issue) => {
         successMessage
       )
 
+      return true
     } catch {
       setCopilotMessage(
         "Unable to load inspection session."
       )
+      return false
     }
   }
 
@@ -1855,6 +1937,15 @@ const isPhotoRequiredBeforeApproval = (issue) => {
       if (data.authenticated) {
         setIsAuthenticated(true)
         setCurrentUser(data.username)
+        localStorage.setItem(
+          AUTH_STORAGE_KEY,
+          JSON.stringify({
+            authenticated: true,
+            username: data.username,
+            session_id: sessionIdRef.current,
+            inspection_title: inspectionTitle,
+          })
+        )
         setLoginPassword("")
         setCopilotMessage(`Logged in as ${data.username}.`)
         await loadSettings()
@@ -1875,6 +1966,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     })
 
     setIsAuthenticated(false)
+    localStorage.removeItem(AUTH_STORAGE_KEY)
     setCurrentUser(null)
     setLoginUsername("")
     setLoginPassword("")
@@ -2088,6 +2180,83 @@ const renderPhotoGalleryPanel = () => (
             </div>
           </button>
         ))}
+      </div>
+    )}
+  </div>
+)
+
+const renderCopyPasteBlocksPanel = () => (
+  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 dark:border-slate-700 dark:bg-slate-900">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+          Copy/Paste Blocks
+        </h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+          Approved finding text for external report software.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => {
+            setMode("review")
+            setCopilotMessage("Review mode active. No pending findings to review.")
+          }}
+          className={compactSecondaryButtonClass}
+        >
+          Back to Review
+        </button>
+
+        <button
+          onClick={() => {
+            setMode("inspection")
+            setCopilotMessage("Inspection mode active. Continue collecting observations.")
+          }}
+          className={compactPrimaryButtonClass}
+        >
+          Return to Inspect
+        </button>
+      </div>
+    </div>
+
+    {approvedCopyBlocks.length === 0 ? (
+      <p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-semibold text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        No approved findings available to copy.
+      </p>
+    ) : (
+      <div className="mt-4 space-y-4">
+        {approvedCopyBlocks.map(({ block, issue }, index) => {
+          const areaLabel =
+            issue?.location_note ||
+            issue?.area ||
+            issue?.system ||
+            "Area not specified"
+          const componentLabel = issue?.component || "Component not specified"
+
+          return (
+            <div
+              key={`${issue?.id || "copy-block"}-${index}`}
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800"
+            >
+              <div className="mb-3 flex flex-col gap-1 text-sm font-bold text-slate-700 dark:text-slate-200">
+                <span>{areaLabel}</span>
+                <span>{componentLabel}</span>
+              </div>
+
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-100">
+                {block}
+              </pre>
+
+              <button
+                onClick={() => copyBlock(block)}
+                className={`mt-4 ${compactPrimaryButtonClass}`}
+              >
+                Copy
+              </button>
+            </div>
+          )
+        })}
       </div>
     )}
   </div>
@@ -3494,6 +3663,8 @@ const renderPhotoGalleryPanel = () => (
                     ))}
                   </div>
                 </div>
+
+                {renderCopyPasteBlocksPanel()}
               </>
             )}
           </section>
@@ -3707,33 +3878,6 @@ const renderPhotoGalleryPanel = () => (
               </div>
             )}
 
-            {reportBlocks.length > 0 && (
-              <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-                <h2 className="text-xl font-bold text-slate-900">
-                  Copy/Paste Blocks
-                </h2>
-
-                <div className="mt-4 space-y-4">
-                  {reportBlocks.map((block, index) => (
-                    <div
-                      key={index}
-                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                    >
-                      <pre className="whitespace-pre-wrap text-sm text-slate-700">
-                        {block}
-                      </pre>
-
-                      <button
-                        onClick={() => copyBlock(block)}
-                        className="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
-                      >
-                        Copy Block
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </aside>
         </main>
 
