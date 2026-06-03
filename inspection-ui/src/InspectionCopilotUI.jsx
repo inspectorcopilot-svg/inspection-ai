@@ -215,6 +215,7 @@ const [savedSessionSearch, setSavedSessionSearch] = useState("")
 
 // Controls visibility of Load Session panel.
 const [showLoadPanel, setShowLoadPanel] = useState(false)
+const [activeMobilePanel, setActiveMobilePanel] = useState(null)
 
 // Manual cloud restore stays separate from the normal local Load action.
 const [cloudRestoreInspectionId, setCloudRestoreInspectionId] = useState("")
@@ -630,6 +631,25 @@ const [settings, setSettings] = useState({
   const markWorkflowSaved = () => {
     setSaveStatus("Saved")
     setLastSavedAt(new Date().toISOString())
+  }
+
+  const showMobilePanel = (panel) => {
+    setActiveMobilePanel((current) => (current === panel ? null : panel))
+    setShowProfileMenu(false)
+    setShowProfilePanel(panel === "profile")
+    setShowSettingsPanel(panel === "settings")
+    setShowLoadPanel(panel === "load")
+    setShowNewInspectionPanel(false)
+    setShowOverridePanel(false)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  const closeMobilePanels = () => {
+    setActiveMobilePanel(null)
+    setShowProfileMenu(false)
+    setShowProfilePanel(false)
+    setShowSettingsPanel(false)
+    setShowLoadPanel(false)
   }
 
 
@@ -1944,13 +1964,77 @@ const renderSettingsHelp = (setting) => (
   </span>
 )
 
+const renderPhotoGalleryPanel = () => (
+  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 dark:border-slate-700 dark:bg-slate-900">
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+          Photo Gallery
+        </h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+          Verify photo documentation before completion.
+        </p>
+      </div>
+
+      <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+        {galleryPhotos.length}
+      </span>
+    </div>
+
+    {galleryPhotos.length === 0 ? (
+      <p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        No attached photos yet.
+      </p>
+    ) : (
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        {galleryPhotos.map((galleryPhoto) => (
+          <button
+            key={galleryPhoto.photo.photo_id}
+            onClick={() => {
+              setSelectedPhoto(galleryPhoto)
+              setReviewedPhotoIds((current) =>
+                current.includes(galleryPhoto.photo.photo_id)
+                  ? current
+                  : [...current, galleryPhoto.photo.photo_id]
+              )
+            }}
+            className="min-h-11 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-left text-slate-900 transition hover:border-blue-500 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-400 dark:hover:bg-blue-950/50"
+          >
+            <img
+              src={getPhotoUrl(galleryPhoto.photo)}
+              alt={galleryPhoto.photo.filename}
+              className="h-28 w-full object-cover"
+            />
+
+            <div className="p-3">
+              <p className="truncate text-sm font-bold">
+                {galleryPhoto.component}
+              </p>
+              <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-300">
+                {galleryPhoto.priorityLevel}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-300">
+                {reviewedPhotoIds.includes(galleryPhoto.photo.photo_id)
+                  ? "Verified"
+                  : "Open to verify"}
+              </p>
+            </div>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+)
+
 
   /*****************************************************************/
   /* 20. UI RENDER */
   /*****************************************************************/
 
+  const inspectionWorkspaceHiddenOnMobile = Boolean(activeMobilePanel)
+
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
+    <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Hidden file/camera input used by the Take Photo button. */}
       <input
         ref={photoInputRef}
@@ -2030,7 +2114,7 @@ const renderSettingsHelp = (setting) => (
     {isAuthenticated && (
       <div className="mx-auto max-w-7xl p-3 pb-24 sm:p-4 sm:pb-4 md:p-6">
         {/* Header: mode navigation and session status. */}
-        <header className="relative mb-4 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 pr-16 shadow-sm sm:mb-6 sm:p-5 sm:pr-20 md:flex-row md:items-center md:justify-between">
+        <header className="relative mb-4 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 pr-28 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:mb-6 sm:p-5 sm:pr-20 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
               Inspection Co-Pilot
@@ -2086,11 +2170,21 @@ const renderSettingsHelp = (setting) => (
             </button>
           </div>
 
+          <div className="absolute right-16 top-4 sm:hidden">
+            <button
+              onClick={() => showMobilePanel("menu")}
+              aria-label="Open menu"
+              className="flex h-10 min-w-16 items-center justify-center rounded-full bg-blue-700 px-3 text-xs font-black uppercase text-white shadow-sm hover:bg-blue-800"
+            >
+              Menu
+            </button>
+          </div>
+
           <div className="absolute right-4 top-4 sm:right-5 sm:top-5">
             <button
               onClick={() => setShowProfileMenu((value) => !value)}
               aria-label="Open profile menu"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-black uppercase text-white shadow-sm hover:bg-slate-700"
+              className="hidden h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-black uppercase text-white shadow-sm hover:bg-slate-700 sm:flex"
             >
               {inspectorDisplayName.charAt(0)}
             </button>
@@ -2108,8 +2202,7 @@ const renderSettingsHelp = (setting) => (
 
                 <button
                   onClick={() => {
-                    setShowProfilePanel((value) => !value)
-                    setShowProfileMenu(false)
+                    showMobilePanel("profile")
                   }}
                   className="mt-2 w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
                 >
@@ -2128,8 +2221,7 @@ const renderSettingsHelp = (setting) => (
 
                 <button
                   onClick={() => {
-                    setShowLoadPanel((value) => !value)
-                    setShowProfileMenu(false)
+                    showMobilePanel("load")
                   }}
                   className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
                 >
@@ -2138,8 +2230,7 @@ const renderSettingsHelp = (setting) => (
 
                 <button
                   onClick={() => {
-                    setShowSettingsPanel((value) => !value)
-                    setShowProfileMenu(false)
+                    showMobilePanel("settings")
                   }}
                   className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-slate-100"
                 >
@@ -2163,6 +2254,113 @@ const renderSettingsHelp = (setting) => (
             )}
           </div>
         </header>
+
+        {activeMobilePanel === "menu" && (
+          <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:hidden">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Menu
+                </p>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                  Inspection tools
+                </h2>
+              </div>
+
+              <button
+                onClick={closeMobilePanels}
+                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => showMobilePanel("settings")}
+                className="min-h-11 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+              >
+                Settings
+              </button>
+
+              <button
+                onClick={() => showMobilePanel("profile")}
+                className="min-h-11 rounded-2xl bg-slate-800 px-4 py-3 text-sm font-bold text-white shadow-sm dark:bg-slate-200 dark:text-slate-950"
+              >
+                Profile
+              </button>
+
+              <button
+                onClick={() => showMobilePanel("load")}
+                className="min-h-11 rounded-2xl bg-indigo-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+              >
+                Load / Restore
+              </button>
+
+              <button
+                onClick={() => showMobilePanel("gallery")}
+                className="min-h-11 rounded-2xl bg-teal-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+              >
+                Photo Gallery
+              </button>
+
+              <button
+                onClick={() => showMobilePanel("help")}
+                className="min-h-11 rounded-2xl bg-purple-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+              >
+                Help / Voice
+              </button>
+
+              <button
+                onClick={logout}
+                className="min-h-11 rounded-2xl bg-red-700 px-4 py-3 text-sm font-bold text-white shadow-sm"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeMobilePanel === "gallery" && (
+          <div className="mb-4 sm:hidden">
+            <div className="mb-3 flex justify-end">
+              <button
+                onClick={closeMobilePanels}
+                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+              >
+                Back to Inspect
+              </button>
+            </div>
+            {renderPhotoGalleryPanel()}
+          </div>
+        )}
+
+        {activeMobilePanel === "help" && (
+          <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:hidden">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                Help / Voice Commands
+              </h2>
+              <button
+                onClick={closeMobilePanels}
+                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <p className="rounded-xl bg-slate-100 p-3 dark:bg-slate-800">
+                Try: “move to garage”, “inspecting electrical panel”, “take photo”, “start review”, or “finish inspection”.
+              </p>
+              <button
+                onClick={startTutorial}
+                className="min-h-11 w-full rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white"
+              >
+                Replay Walkthrough
+              </button>
+            </div>
+          </div>
+        )}
 
         {showNewInspectionPanel && (
           <div className="mb-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm sm:mb-6 sm:p-5">
@@ -2212,7 +2410,9 @@ const renderSettingsHelp = (setting) => (
         )}
 
         {showProfilePanel && (
-          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:mb-6 sm:p-5">
+          <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:mb-6 sm:p-5 ${
+            activeMobilePanel === "profile" ? "" : "hidden sm:block"
+          }`}>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-xl font-black uppercase text-white">
@@ -2229,8 +2429,11 @@ const renderSettingsHelp = (setting) => (
               </div>
 
               <button
-                onClick={() => setShowProfilePanel(false)}
-                className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700"
+                onClick={() => {
+                  setShowProfilePanel(false)
+                  setActiveMobilePanel(null)
+                }}
+                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
               >
                 Close
               </button>
@@ -2239,7 +2442,9 @@ const renderSettingsHelp = (setting) => (
         )}
 
         {/* Save / Load status banner. */}
-          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 sm:mb-6">
+          <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 sm:mb-6 ${
+            activeMobilePanel === "load" ? "" : "hidden sm:block"
+          }`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
                 <p>
@@ -2299,7 +2504,7 @@ const renderSettingsHelp = (setting) => (
                     <button
                       key={session.session_id}
                       onClick={() => loadSession(session.session_id)}
-                      className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left hover:bg-slate-100"
+                      className="min-h-11 w-full rounded-xl border border-slate-200 bg-white p-3 text-left hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
                     >
                       <p className="font-bold text-slate-800">
                         {session.inspection_title || "Untitled Inspection"}
@@ -2349,7 +2554,7 @@ const renderSettingsHelp = (setting) => (
                     <button
                       onClick={restoreSessionFromSupabase}
                       disabled={cloudRestoreLoading}
-                      className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-11 rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-700 disabled:opacity-80 dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
                     >
                       {cloudRestoreLoading
                         ? "Restoring..."
@@ -2375,7 +2580,9 @@ const renderSettingsHelp = (setting) => (
 
         {/* Settings drawer. */}
         {showSettingsPanel && (
-          <div className="mb-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm sm:mb-6 sm:p-5">
+          <div className={`mb-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-900 dark:bg-slate-900 sm:mb-6 sm:p-5 ${
+            activeMobilePanel === "settings" ? "" : "hidden sm:block"
+          }`}>
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
@@ -2387,8 +2594,11 @@ const renderSettingsHelp = (setting) => (
               </div>
 
               <button
-                onClick={() => setShowSettingsPanel(false)}
-                className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700"
+                onClick={() => {
+                  setShowSettingsPanel(false)
+                  setActiveMobilePanel(null)
+                }}
+                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold text-white dark:bg-slate-200 dark:text-slate-950"
               >
                 Close
               </button>
@@ -2706,7 +2916,9 @@ const renderSettingsHelp = (setting) => (
             </div>
           )}
 
-        <main className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+        <main className={`grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3 ${
+          inspectionWorkspaceHiddenOnMobile ? "hidden sm:grid" : ""
+        }`}>
           <section className="flex flex-col gap-4 sm:gap-6 lg:col-span-2">
             {/* Inspection Mode: collect observations and attach field context. */}
             {mode === "inspection" && (
@@ -3157,7 +3369,7 @@ const renderSettingsHelp = (setting) => (
           </section>
 
           {/* Sidebar: counts, pending/review queue, completion controls, coverage, and report blocks. */}
-          <aside className="flex flex-col gap-4 sm:gap-6">
+          <aside className="hidden flex-col gap-4 sm:flex sm:gap-6">
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-2xl border border-slate-200 bg-white p-3 text-center shadow-sm sm:p-4">
                 <p className="text-xs font-bold uppercase text-slate-400">
@@ -3196,7 +3408,7 @@ const renderSettingsHelp = (setting) => (
                   No pending findings remain in the review queue.
                 </p>
               </div>
-            ) : (
+            ) : mode === "review" ? (
             <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="mb-5 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-slate-900">
@@ -3254,7 +3466,7 @@ const renderSettingsHelp = (setting) => (
                 ))}
               </div>
             </div>
-            )}
+            ) : null}
 
             {mode !== "complete" && (
               <div className="rounded-3xl bg-slate-900 p-4 text-white shadow-sm sm:p-6">
@@ -3326,65 +3538,7 @@ const renderSettingsHelp = (setting) => (
               </div>
             )}
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">
-                    Photo Gallery
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Verify photo documentation before completion.
-                  </p>
-                </div>
-
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">
-                  {galleryPhotos.length}
-                </span>
-              </div>
-
-              {galleryPhotos.length === 0 ? (
-                <p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-                  No attached photos yet.
-                </p>
-              ) : (
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  {galleryPhotos.map((galleryPhoto) => (
-                    <button
-                      key={galleryPhoto.photo.photo_id}
-                      onClick={() => {
-                        setSelectedPhoto(galleryPhoto)
-                        setReviewedPhotoIds((current) =>
-                          current.includes(galleryPhoto.photo.photo_id)
-                            ? current
-                            : [...current, galleryPhoto.photo.photo_id]
-                        )
-                      }}
-                      className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-left transition hover:border-blue-400 hover:bg-blue-50"
-                    >
-                      <img
-                        src={getPhotoUrl(galleryPhoto.photo)}
-                        alt={galleryPhoto.photo.filename}
-                        className="h-28 w-full object-cover"
-                      />
-
-                      <div className="p-3">
-                        <p className="truncate text-sm font-bold text-slate-900">
-                          {galleryPhoto.component}
-                        </p>
-                        <p className="mt-1 text-xs font-bold text-slate-500">
-                          {galleryPhoto.priorityLevel}
-                        </p>
-                        <p className="mt-1 text-xs font-semibold text-slate-500">
-                          {reviewedPhotoIds.includes(galleryPhoto.photo.photo_id)
-                            ? "Verified"
-                            : "Open to verify"}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {renderPhotoGalleryPanel()}
 
             {mode === "complete" && (
               <div
@@ -3450,35 +3604,42 @@ const renderSettingsHelp = (setting) => (
         </main>
 
         {/* Mobile field toolbar: keeps primary workflow actions thumb-friendly. */}
-        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-2xl backdrop-blur sm:hidden">
-          <div className="mx-auto grid max-w-md grid-cols-5 gap-2">
+        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:hidden">
+          <div className="mx-auto grid max-w-md grid-cols-4 gap-2">
             <button
               onClick={() => {
                 setShowNewInspectionPanel(true)
+                setActiveMobilePanel(null)
                 window.scrollTo({ top: 0, behavior: "smooth" })
               }}
-              className="rounded-xl bg-slate-900 px-1 py-3 text-xs font-bold text-white"
+              className="min-h-11 rounded-xl bg-slate-900 px-1 py-3 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-950"
             >
               New
             </button>
 
             <button
-              onClick={() => setMode("inspection")}
+              onClick={() => {
+                setMode("inspection")
+                closeMobilePanels()
+              }}
               className={`rounded-xl px-1 py-3 text-xs font-bold ${
                 mode === "inspection"
                   ? "bg-blue-600 text-white"
-                  : "bg-slate-100 text-slate-700"
+                  : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100"
               }`}
             >
               Inspect
             </button>
 
             <button
-              onClick={enterReviewMode}
+              onClick={() => {
+                closeMobilePanels()
+                enterReviewMode()
+              }}
               className={`rounded-xl px-1 py-3 text-xs font-bold ${
                 mode === "review"
                   ? "bg-orange-600 text-white"
-                  : "bg-slate-100 text-slate-700"
+                  : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100"
               }`}
             >
               Review
@@ -3487,19 +3648,9 @@ const renderSettingsHelp = (setting) => (
             <button
               onClick={() => saveSession(false)}
               disabled={!sessionId}
-              className="rounded-xl bg-green-600 px-1 py-3 text-xs font-bold text-white disabled:opacity-50"
+              className="min-h-11 rounded-xl bg-green-700 px-1 py-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
             >
               Save
-            </button>
-
-            <button
-              onClick={() => {
-                setShowProfileMenu((value) => !value)
-                window.scrollTo({ top: 0, behavior: "smooth" })
-              }}
-              className="rounded-xl bg-slate-900 px-1 py-3 text-xs font-bold text-white"
-            >
-              Profile
             </button>
           </div>
         </nav>
