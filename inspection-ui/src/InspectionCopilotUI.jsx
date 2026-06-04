@@ -32,7 +32,7 @@ TABLE OF CONTENTS
 
 *****************************************************************/
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 
 /*****************************************************************/
@@ -46,6 +46,7 @@ const API_BASE = (
   import.meta.env.VITE_API_BASE_URL ||
   `${window.location.protocol}//${window.location.hostname}:8000`
 ).replace(/\/+$/, "")
+const FRONTEND_VERSION = import.meta.env.PACKAGE_VERSION || "0.0.0"
 
 /*****************************************************************/
 /* 2. DROPDOWN OPTIONS AND PRIORITY STYLING */
@@ -197,7 +198,9 @@ const [loading, setLoading] = useState(false)
 
 // Voice recognition state.
 const [isListening, setIsListening] = useState(false)
-const [voiceSupported, setVoiceSupported] = useState(true)
+const [voiceSupported] = useState(
+  () => Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+)
 const [autoSubmitVoice, setAutoSubmitVoice] = useState(true)
 const [lastVoiceCommand, setLastVoiceCommand] = useState("")
 const [followUpAnswer, setFollowUpAnswer] = useState("")
@@ -271,7 +274,16 @@ const [settingsLoading, setSettingsLoading] = useState(false)
 
 // Status message for settings save/load actions.
 const [settingsStatus, setSettingsStatus] = useState("")
+const [settingsStorageMode, setSettingsStorageMode] = useState("unknown")
 const [activeSettingsHelp, setActiveSettingsHelp] = useState(null)
+const [showDiagnosticsPanel, setShowDiagnosticsPanel] = useState(false)
+const [diagnosticsStatus, setDiagnosticsStatus] = useState({
+  backendHealth: "Not tested",
+  supabaseHealth: "Not tested",
+  photoUpload: "Not tested",
+  currentStorageMode: "unknown",
+})
+const [diagnosticsLoading, setDiagnosticsLoading] = useState("")
 const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
   window.matchMedia?.("(prefers-color-scheme: dark)").matches || false
 )
@@ -312,6 +324,22 @@ const [settings, setSettings] = useState({
   const activeIssueRef = useRef(activeIssue)
   const voiceModeRef = useRef("observation")
   const photoInputRef = useRef(null)
+  const storedAuthRef = useRef(storedAuth)
+  const createSessionRef = useRef(null)
+  const loadSessionRef = useRef(null)
+  const loadSavedSessionsRef = useRef(null)
+  const saveSessionRef = useRef(null)
+  const handleVoiceCommandRef = useRef(null)
+  const submitObservationRef = useRef(null)
+  const submitFollowUpAnswerRef = useRef(null)
+
+  const selectActiveIssue = (issue) => {
+    setActiveIssue(issue)
+
+    if (issue?.priority_score) {
+      setOverrideScore(issue.priority_score)
+    }
+  }
 
 
   /*****************************************************************/
@@ -413,25 +441,26 @@ const [settings, setSettings] = useState({
   // Keep active finding ref synced and update override slider when selected issue changes.
   useEffect(() => {
     activeIssueRef.current = activeIssue
-    if (activeIssue?.priority_score) {
-      setOverrideScore(activeIssue.priority_score)
-    }
   }, [activeIssue])
 
 
   // Create or restore the backend inspection session when the app first loads.
   useEffect(() => {
     const initializeSession = async () => {
-      if (storedAuth?.authenticated && storedAuth?.session_id) {
-        const restored = await loadSession(
-          storedAuth.session_id,
+      const stored = storedAuthRef.current
+
+      if (stored?.authenticated && stored?.session_id) {
+        const restored = await loadSessionRef.current?.(
+          stored.session_id,
           "Inspection session restored."
         )
 
         if (restored) return
       }
 
-      await createSession(storedAuth?.inspection_title || "Untitled Inspection")
+      await createSessionRef.current?.(
+        stored?.inspection_title || "Untitled Inspection"
+      )
     }
 
     initializeSession()
@@ -445,7 +474,7 @@ const [settings, setSettings] = useState({
   useEffect(() => {
     if (!isAuthenticated) return
 
-    loadSavedSessions(true)
+    loadSavedSessionsRef.current?.(true)
   }, [isAuthenticated])
 
   useEffect(() => {
@@ -474,7 +503,7 @@ const [settings, setSettings] = useState({
     if (inspectionTitle === "Untitled Inspection" && allIssues.length === 0) return
 
     const timer = setInterval(() => {
-      saveSession(true)
+      saveSessionRef.current?.(true)
     }, (settings.auto_save_interval_seconds || 30) * 1000)
 
     return () => clearInterval(timer)
@@ -487,7 +516,6 @@ const [settings, setSettings] = useState({
       window.SpeechRecognition || window.webkitSpeechRecognition
 
     if (!SpeechRecognition) {
-      setVoiceSupported(false)
       return
     }
 
@@ -503,7 +531,7 @@ const [settings, setSettings] = useState({
         setFollowUpAnswer(transcript)
 
         if (activeIssueRef.current) {
-          await submitFollowUpAnswer(activeIssueRef.current, transcript)
+          await submitFollowUpAnswerRef.current?.(activeIssueRef.current, transcript)
         }
 
         return
@@ -511,7 +539,7 @@ const [settings, setSettings] = useState({
 
       setObservation(transcript)
 
-      const handledCommand = await handleVoiceCommand(transcript)
+      const handledCommand = await handleVoiceCommandRef.current?.(transcript)
 
       if (handledCommand) {
         setObservation("")
@@ -519,7 +547,7 @@ const [settings, setSettings] = useState({
       }
 
       if (autoSubmitVoice && mode === "inspection") {
-        await submitObservation(transcript)
+        await submitObservationRef.current?.(transcript)
       }
     }
 
@@ -535,11 +563,6 @@ const [settings, setSettings] = useState({
 
     recognitionRef.current = recognition
   }, [autoSubmitVoice, mode, settings.voice_language])
-
-  useEffect(() => {
-    setInspectionTitleDraft(inspectionTitle)
-  }, [inspectionTitle])
-
 
   /*****************************************************************/
   /* 7. COMPUTED VALUES */
@@ -795,7 +818,7 @@ const [settings, setSettings] = useState({
 
     setIssues([])
     setAllIssues([])
-    setActiveIssue(null)
+    selectActiveIssue(null)
     setCoverage(null)
     setReportBlocks([])
     setSelectedPhoto(null)
@@ -1232,7 +1255,7 @@ const [settings, setSettings] = useState({
       if (data.issue) {
         setIssues((prev) => [data.issue, ...prev])
         setAllIssues((prev) => [data.issue, ...prev])
-        setActiveIssue(data.issue)
+        selectActiveIssue(data.issue)
 
         const interaction = data.interaction
 
@@ -1283,7 +1306,7 @@ const [settings, setSettings] = useState({
         prev.map((item) => (item.id === data.issue.id ? data.issue : item))
       )
 
-      setActiveIssue(data.issue)
+      selectActiveIssue(data.issue)
 
       setCopilotMessage(
         `Follow-up recorded. Updated priority: ${data.issue.priority_level} (${data.issue.priority_score}).`
@@ -1386,7 +1409,7 @@ const [settings, setSettings] = useState({
           prev.map((item) => (item.id === data.issue.id ? data.issue : item))
         )
 
-        setActiveIssue(data.issue)
+        selectActiveIssue(data.issue)
 
         setCopilotMessage(
           `Photo attached. ${data.photo_count} photo(s) now linked to this finding.`
@@ -1414,12 +1437,12 @@ const [settings, setSettings] = useState({
     setShowOverridePanel(false)
 
     if (sortedIssues.length > 0) {
-      setActiveIssue(sortedIssues[0])
+      selectActiveIssue(sortedIssues[0])
       setCopilotMessage(
         `Review mode active. Start with ${sortedIssues[0].priority_level} finding: ${sortedIssues[0].component}.`
       )
     } else {
-      setActiveIssue(null)
+      selectActiveIssue(null)
       setCopilotMessage("Review mode active. No pending findings to review.")
     }
   }
@@ -1471,7 +1494,7 @@ const applyPriorityOverride = async (score = overrideScore) => {
       prev.map((item) => (item.id === updatedIssue.id ? updatedIssue : item))
     )
 
-    setActiveIssue(updatedIssue)
+    selectActiveIssue(updatedIssue)
     setOverrideScore(updatedIssue.priority_score)
     setShowOverridePanel(false)
 
@@ -1559,7 +1582,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     )
 
     if (nextIssue) {
-      setActiveIssue(nextIssue)
+      selectActiveIssue(nextIssue)
       setShowOverridePanel(false)
       setCopilotMessage(
         status === "approved"
@@ -1567,7 +1590,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
           : `Finding rejected. Next finding: ${nextIssue.priority_level} - ${nextIssue.component}.`
       )
     } else {
-      setActiveIssue(null)
+      selectActiveIssue(null)
       setShowOverridePanel(false)
       setCopilotMessage(
         status === "approved"
@@ -1611,12 +1634,6 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     setCopilotMessage(
       "Copy/paste blocks are ready. Review coverage and copy approved finding text when ready."
     )
-  }
-
-
-  // Alias used by voice commands to move into review mode.
-  const finishInspection = async () => {
-    await enterReviewMode()
   }
 
   /*****************************************************************/
@@ -1734,7 +1751,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
         loaded.issues || loaded.pending_review || []
       )
 
-      setActiveIssue(
+      selectActiveIssue(
         (loaded.pending_review || [])[0] || null
       )
 
@@ -2004,11 +2021,16 @@ const loadSettings = async () => {
     const response = await fetch(`${API_BASE}/settings`)
     const data = await response.json()
 
-    if (data.settings) {
-      setSettings(data.settings)
+      if (data.settings) {
+        setSettings(data.settings)
+        setSettingsStorageMode(data.storage_mode || "unknown")
+        setDiagnosticsStatus((current) => ({
+          ...current,
+          currentStorageMode: data.storage_mode || "unknown",
+        }))
 
-      setAutoSubmitVoice(data.settings.voice_auto_submit)
-      setAutoSaveEnabled(data.settings.auto_save_enabled)
+        setAutoSubmitVoice(data.settings.voice_auto_submit)
+        setAutoSaveEnabled(data.settings.auto_save_enabled)
 
       if (data.settings.default_mode) {
         setMode(data.settings.default_mode)
@@ -2044,6 +2066,11 @@ const saveSettings = async () => {
 
     if (data.saved) {
       setSettings(data.settings)
+      setSettingsStorageMode(data.storage_mode || "unknown")
+      setDiagnosticsStatus((current) => ({
+        ...current,
+        currentStorageMode: data.storage_mode || "unknown",
+      }))
 
       setAutoSubmitVoice(data.settings.voice_auto_submit)
       setAutoSaveEnabled(data.settings.auto_save_enabled)
@@ -2067,6 +2094,94 @@ const updateSetting = (key, value) => {
     ...current,
     [key]: value,
   }))
+}
+
+const testBackendHealth = async () => {
+  try {
+    setDiagnosticsLoading("backend")
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      backendHealth: "Testing...",
+    }))
+
+    const response = await fetch(`${API_BASE}/health`, {
+      cache: "no-store",
+    })
+    const data = await response.json()
+
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      backendHealth:
+        response.ok && data.status === "ok"
+          ? "Connected"
+          : "Backend did not return healthy status",
+    }))
+  } catch {
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      backendHealth: "Failed to connect",
+    }))
+  } finally {
+    setDiagnosticsLoading("")
+  }
+}
+
+const testSupabaseHealth = async () => {
+  try {
+    setDiagnosticsLoading("supabase")
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      supabaseHealth: "Testing...",
+    }))
+
+    const response = await fetch(`${API_BASE}/supabase/health`, {
+      cache: "no-store",
+    })
+    const data = await response.json()
+
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      supabaseHealth:
+        response.ok &&
+        data.supabase_configured &&
+        data.client_created &&
+        data.profiles_readable
+          ? "Connected"
+          : "Supabase health check failed",
+      currentStorageMode: settingsStorageMode,
+    }))
+  } catch {
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      supabaseHealth: "Failed to connect",
+    }))
+  } finally {
+    setDiagnosticsLoading("")
+  }
+}
+
+const testPhotoUpload = () => {
+  if (!sessionIdRef.current) {
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      photoUpload: "No active inspection session",
+    }))
+    return
+  }
+
+  if (!activeIssueRef.current) {
+    setDiagnosticsStatus((current) => ({
+      ...current,
+      photoUpload: "Select or create an active finding first",
+    }))
+    return
+  }
+
+  setDiagnosticsStatus((current) => ({
+    ...current,
+    photoUpload: "Opening normal photo picker",
+  }))
+  triggerPhotoUpload()
 }
 
 const settingsHelp = {
@@ -2261,6 +2376,16 @@ const renderCopyPasteBlocksPanel = () => (
     )}
   </div>
 )
+
+useLayoutEffect(() => {
+  createSessionRef.current = createSession
+  loadSessionRef.current = loadSession
+  loadSavedSessionsRef.current = loadSavedSessions
+  saveSessionRef.current = saveSession
+  handleVoiceCommandRef.current = handleVoiceCommand
+  submitObservationRef.current = submitObservation
+  submitFollowUpAnswerRef.current = submitFollowUpAnswer
+})
 
 
   /*****************************************************************/
@@ -2581,7 +2706,7 @@ const renderCopyPasteBlocksPanel = () => (
           </div>
         )}
 
-        {false && activeMobilePanel === "help" && (
+        {activeMobilePanel === "unused-help" && (
           <div className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:hidden">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
@@ -3133,6 +3258,129 @@ const renderCopyPasteBlocksPanel = () => (
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                    QA / Testing
+                  </p>
+                  <h3 className="font-bold text-slate-900">
+                    Diagnostics
+                  </h3>
+                </div>
+
+                <button
+                  onClick={() => setShowDiagnosticsPanel((value) => !value)}
+                  className={compactSecondaryButtonClass}
+                >
+                  {showDiagnosticsPanel ? "Hide Diagnostics" : "Show Diagnostics"}
+                </button>
+              </div>
+
+              {showDiagnosticsPanel && (
+                <div className="mt-4 space-y-4">
+                  <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Frontend Version
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                        {FRONTEND_VERSION}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Backend URL
+                      </p>
+                      <p className="mt-1 break-all font-semibold text-slate-700 dark:text-slate-100">
+                        {API_BASE}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Backend Health
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                        {diagnosticsStatus.backendHealth}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Supabase Health
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                        {diagnosticsStatus.supabaseHealth}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Current Inspection ID
+                      </p>
+                      <p className="mt-1 break-all font-semibold text-slate-700 dark:text-slate-100">
+                        {sessionId || "No active session"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Current User
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                        {currentUser || "Not signed in"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900 md:col-span-2">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Current Storage Mode
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                        {diagnosticsStatus.currentStorageMode || settingsStorageMode}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900 md:col-span-2">
+                      <p className="text-xs font-bold uppercase text-slate-400">
+                        Photo Upload Test
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                        {diagnosticsStatus.photoUpload}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={testBackendHealth}
+                      disabled={diagnosticsLoading === "backend"}
+                      className={compactPrimaryButtonClass}
+                    >
+                      {diagnosticsLoading === "backend" ? "Testing..." : "Test Backend"}
+                    </button>
+
+                    <button
+                      onClick={testSupabaseHealth}
+                      disabled={diagnosticsLoading === "supabase"}
+                      className={compactPrimaryButtonClass}
+                    >
+                      {diagnosticsLoading === "supabase" ? "Testing..." : "Test Supabase"}
+                    </button>
+
+                    <button
+                      onClick={testPhotoUpload}
+                      className={compactSecondaryButtonClass}
+                    >
+                      Test Photo Upload
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="mt-5 flex flex-wrap justify-end gap-3">
@@ -3731,7 +3979,7 @@ const renderCopyPasteBlocksPanel = () => (
                   <button
                     key={issue.id}
                     onClick={() => {
-                      setActiveIssue(issue)
+                      selectActiveIssue(issue)
                       setShowOverridePanel(false)
                       setCopilotMessage(
                         issue.interaction?.co_pilot_message ||
