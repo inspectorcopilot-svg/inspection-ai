@@ -114,6 +114,11 @@ const readStoredAuth = () => {
   }
 }
 
+const clearStoredAuthSession = () => {
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  sessionStorage.removeItem(AUTH_STORAGE_KEY)
+}
+
 const TUTORIAL_STEPS = [
   {
     title: "Welcome to Inspection Co-Pilot",
@@ -725,7 +730,10 @@ const [settings, setSettings] = useState({
   }
 
   const showMobilePanel = (panel) => {
-    setActiveMobilePanel((current) => (current === panel ? null : panel))
+    setActiveMobilePanel((current) => {
+      if (panel === "menu") return "menu"
+      return current === panel ? null : panel
+    })
     setShowProfileMenu(false)
     setShowProfilePanel(panel === "profile")
     setShowSettingsPanel(panel === "settings")
@@ -1978,18 +1986,25 @@ const isPhotoRequiredBeforeApproval = (issue) => {
 
   // Logs out of local mode and hides session-specific panels.
   const logout = async () => {
-    await fetch(`${API_BASE}/auth/logout`, {
-      method: "POST",
-    })
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+      })
+    } catch {
+      // Local logout must still clear frontend state if the backend is unavailable.
+    }
 
+    clearStoredAuthSession()
     setIsAuthenticated(false)
-    localStorage.removeItem(AUTH_STORAGE_KEY)
     setCurrentUser(null)
     setLoginUsername("")
     setLoginPassword("")
     setShowLoadPanel(false)
     setShowProfileMenu(false)
     setShowProfilePanel(false)
+    setShowSettingsPanel(false)
+    setActiveMobilePanel(null)
+    setCloudRestoreStatus("")
     setTutorialStep(null)
     setShowRecoveryPrompt(false)
     setMode("inspection")
@@ -2081,6 +2096,16 @@ const saveSettings = async () => {
           : "Settings using local fallback"
       )
       setShowSettingsPanel(false)
+      setActiveMobilePanel(null)
+      setShowProfileMenu(false)
+      setShowProfilePanel(false)
+      setShowLoadPanel(false)
+      setMode("inspection")
+      setCopilotMessage(
+        data.storage_mode === "supabase"
+          ? "Settings saved to Supabase"
+          : "Settings saved using local fallback"
+      )
     }
   } catch {
     setSettingsStatus("Could not save settings")
