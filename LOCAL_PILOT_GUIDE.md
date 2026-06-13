@@ -59,6 +59,14 @@ username and password. The inspector uses that login when the app opens.
 These are local pilot credentials only. They are not a replacement for
 production user accounts.
 
+The admin login is for the owner/development workflow. The tester login is
+for field testing with inspectors. Change the tester password before giving
+it out by editing:
+
+```text
+users/tester/pilot_config.json
+```
+
 ## First Login Walkthrough
 
 The first successful login opens an optional walkthrough explaining the main

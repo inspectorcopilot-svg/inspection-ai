@@ -32,7 +32,7 @@ NOTES FOR FUTURE CHANGES
 # 1. IMPORTS
 # ================================================================
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -98,13 +98,44 @@ app.add_middleware(
 # ================================================================
 
 LOCAL_USER_ID = "local_user"
+TESTER_USER_ID = "tester"
 USER_ROOT_DIR = "users"
-USER_INSPECTION_DIR = os.path.join(USER_ROOT_DIR, LOCAL_USER_ID, "inspections")
-USER_PROFILE_PATH = os.path.join(USER_ROOT_DIR, LOCAL_USER_ID, "profile.json")
-USER_SETTINGS_PATH = os.path.join(USER_ROOT_DIR, LOCAL_USER_ID, "settings.json")
-PILOT_CONFIG_PATH = os.path.join(USER_ROOT_DIR, LOCAL_USER_ID, "pilot_config.json")
+TESTER_TEMP_PASSWORD = "TestPilot2026!"
+
+
+def local_user_dir(user_id: str) -> str:
+    if user_id == TESTER_USER_ID:
+        return "tester_storage"
+
+    return os.path.join(USER_ROOT_DIR, user_id)
+
+
+def local_user_inspection_dir(user_id: str) -> str:
+    return os.path.join(local_user_dir(user_id), "inspections")
+
+
+def local_user_profile_path(user_id: str) -> str:
+    return os.path.join(local_user_dir(user_id), "profile.json")
+
+
+def local_user_settings_path(user_id: str) -> str:
+    return os.path.join(local_user_dir(user_id), "settings.json")
+
+
+def local_user_config_path(user_id: str) -> str:
+    if user_id == TESTER_USER_ID:
+        return os.path.join(USER_ROOT_DIR, TESTER_USER_ID, "pilot_config.json")
+
+    return os.path.join(local_user_dir(user_id), "pilot_config.json")
+
+
+USER_INSPECTION_DIR = local_user_inspection_dir(LOCAL_USER_ID)
+USER_PROFILE_PATH = local_user_profile_path(LOCAL_USER_ID)
+USER_SETTINGS_PATH = local_user_settings_path(LOCAL_USER_ID)
+PILOT_CONFIG_PATH = local_user_config_path(LOCAL_USER_ID)
 
 os.makedirs(USER_INSPECTION_DIR, exist_ok=True)
+os.makedirs(local_user_inspection_dir(TESTER_USER_ID), exist_ok=True)
 
 
 def load_local_credentials():
@@ -128,7 +159,53 @@ def load_local_credentials():
 LOCAL_USERNAME, LOCAL_PASSWORD = load_local_credentials()
 
 
-def inspection_session_path(session_id: str) -> str:
+def load_tester_credentials():
+    """Load field-tester credentials with a local temporary fallback."""
+
+    tester_config_path = local_user_config_path(TESTER_USER_ID)
+
+    if os.path.exists(tester_config_path):
+        with open(tester_config_path, "r", encoding="utf-8") as file:
+            config = json.load(file)
+
+        return (
+            config.get("username", "tester"),
+            config.get("password", TESTER_TEMP_PASSWORD),
+        )
+
+    return (
+        os.getenv("INSPECTION_COPILOT_TESTER_USERNAME", "tester"),
+        os.getenv("INSPECTION_COPILOT_TESTER_PASSWORD", TESTER_TEMP_PASSWORD),
+    )
+
+
+TESTER_USERNAME, TESTER_PASSWORD = load_tester_credentials()
+LOCAL_ACCOUNTS = {
+    LOCAL_USERNAME: {
+        "password": LOCAL_PASSWORD,
+        "user_id": LOCAL_USER_ID,
+        "display_name": "Local Inspector",
+        "role": "owner",
+    },
+    TESTER_USERNAME: {
+        "password": TESTER_PASSWORD,
+        "user_id": TESTER_USER_ID,
+        "display_name": "Field Tester",
+        "role": "tester",
+    },
+}
+
+
+def local_user_id_from_username(username: str) -> str:
+    account = LOCAL_ACCOUNTS.get((username or "").strip())
+    return account["user_id"] if account else LOCAL_USER_ID
+
+
+def request_local_user_id(request: Request) -> str:
+    return local_user_id_from_username(request.headers.get("X-Local-User", LOCAL_USERNAME))
+
+
+def inspection_session_path(session_id: str, user_id: str = LOCAL_USER_ID) -> str:
     """Return the saved-session path only for a valid workflow UUID."""
 
     try:
@@ -136,7 +213,10 @@ def inspection_session_path(session_id: str) -> str:
     except (TypeError, ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid inspection session ID")
 
-    return os.path.join(USER_INSPECTION_DIR, f"{safe_session_id}.json")
+    inspection_dir = local_user_inspection_dir(user_id)
+    os.makedirs(inspection_dir, exist_ok=True)
+
+    return os.path.join(inspection_dir, f"{safe_session_id}.json")
 
 
 # ================================================================
@@ -166,22 +246,32 @@ app.mount("/issue-photos", StaticFiles(directory=PHOTO_DIR), name="issue_photos"
 # USER PROFILE / SETTINGS BOOTSTRAP
 # ================================================================
 
-def ensure_local_user_files():
-    if not os.path.exists(USER_PROFILE_PATH):
-        with open(USER_PROFILE_PATH, "w", encoding="utf-8") as file:
+def ensure_local_user_files(user_id: str = LOCAL_USER_ID, username: str = LOCAL_USERNAME):
+    user_dir = local_user_dir(user_id)
+    inspection_dir = local_user_inspection_dir(user_id)
+    profile_path = local_user_profile_path(user_id)
+    settings_path = local_user_settings_path(user_id)
+
+    os.makedirs(user_dir, exist_ok=True)
+    os.makedirs(inspection_dir, exist_ok=True)
+
+    if not os.path.exists(profile_path):
+        display_name = "Field Tester" if user_id == TESTER_USER_ID else "Local Inspector"
+
+        with open(profile_path, "w", encoding="utf-8") as file:
             json.dump(
                 {
-                    "user_id": LOCAL_USER_ID,
-                    "username": LOCAL_USERNAME,
-                    "display_name": "Local Inspector",
+                    "user_id": user_id,
+                    "username": username,
+                    "display_name": display_name,
                     "created_at": datetime.now().isoformat(),
                 },
                 file,
                 indent=2,
             )
 
-    if not os.path.exists(USER_SETTINGS_PATH):
-        with open(USER_SETTINGS_PATH, "w", encoding="utf-8") as file:
+    if not os.path.exists(settings_path):
+        with open(settings_path, "w", encoding="utf-8") as file:
             json.dump(
                 {
                     "inspector_name": "",
@@ -208,7 +298,8 @@ def ensure_local_user_files():
             )
 
 
-ensure_local_user_files()
+for account_username, account in LOCAL_ACCOUNTS.items():
+    ensure_local_user_files(account["user_id"], account_username)
 
 
 # ================================================================
@@ -338,7 +429,7 @@ class SettingsRequest(BaseModel):
 # 6. SESSION SAVE / LOAD ENDPOINTS
 # ================================================================
 
-def persist_session(session_id: str):
+def persist_session(session_id: str, user_id: str = LOCAL_USER_ID):
     """Persist an active session after meaningful workflow changes."""
     try:
         session_data = workflow.export_session(session_id)
@@ -349,11 +440,11 @@ def persist_session(session_id: str):
             detail="Inspection session no longer exists in memory. Create or load a session first."
         )
 
-    file_path = inspection_session_path(session_id)
+    file_path = inspection_session_path(session_id, user_id)
 
     session_data["saved_at"] = datetime.now().isoformat()
     session_data["updated_at"] = session_data["saved_at"]
-    session_data["user_id"] = LOCAL_USER_ID
+    session_data["user_id"] = user_id
     session_data["storage_mode"] = "local_user"
 
     with open(file_path, "w", encoding="utf-8") as file:
@@ -363,17 +454,17 @@ def persist_session(session_id: str):
         "saved": True,
         "session_id": session_id,
         "saved_at": session_data["saved_at"],
-        "user_id": LOCAL_USER_ID,
+        "user_id": user_id,
     }
 
 
 @app.post("/workflow/session/{session_id}/save")
-def save_session(session_id: str):
-    return persist_session(session_id)
+def save_session(session_id: str, request: Request):
+    return persist_session(session_id, request_local_user_id(request))
 
 
 @app.post("/workflow/session/{session_id}/title")
-def update_session_title(session_id: str, payload: SessionTitleRequest):
+def update_session_title(session_id: str, payload: SessionTitleRequest, request: Request):
     """Update the active inspection session label used for save/load lists."""
 
     inspection_title = (
@@ -391,7 +482,7 @@ def update_session_title(session_id: str, payload: SessionTitleRequest):
         )
 
     session.inspection_title = inspection_title
-    saved = persist_session(session_id)
+    saved = persist_session(session_id, request_local_user_id(request))
 
     return {
         "updated": True,
@@ -402,14 +493,17 @@ def update_session_title(session_id: str, payload: SessionTitleRequest):
 
 
 @app.get("/workflow/sessions")
-def list_saved_sessions():
+def list_saved_sessions(request: Request):
     sessions = []
+    user_id = request_local_user_id(request)
+    inspection_dir = local_user_inspection_dir(user_id)
+    os.makedirs(inspection_dir, exist_ok=True)
 
-    for file_name in os.listdir(USER_INSPECTION_DIR):
+    for file_name in os.listdir(inspection_dir):
         if not file_name.endswith(".json"):
             continue
 
-        file_path = os.path.join(USER_INSPECTION_DIR, file_name)
+        file_path = os.path.join(inspection_dir, file_name)
 
         with open(file_path, "r", encoding="utf-8") as file:
             data = json.load(file)
@@ -423,7 +517,7 @@ def list_saved_sessions():
                 "issue_count": len(data.get("issues", [])),
                 "confirmed_count": len(data.get("confirmed", [])),
                 "state": data.get("state"),
-                "user_id": data.get("user_id", LOCAL_USER_ID),
+                "user_id": data.get("user_id", user_id),
             }
         )
 
@@ -431,13 +525,14 @@ def list_saved_sessions():
 
     return {
         "sessions": sessions,
-        "user_id": LOCAL_USER_ID,
+        "user_id": user_id,
     }
 
 
 @app.get("/workflow/session/{session_id}/load")
-def load_session(session_id: str):
-    file_path = inspection_session_path(session_id)
+def load_session(session_id: str, request: Request):
+    user_id = request_local_user_id(request)
+    file_path = inspection_session_path(session_id, user_id)
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Saved session not found")
@@ -450,7 +545,7 @@ def load_session(session_id: str):
     return {
         "loaded": True,
         "session": loaded,
-        "user_id": LOCAL_USER_ID,
+        "user_id": user_id,
     }
 
 
@@ -588,10 +683,10 @@ def get_supabase_profile_and_settings():
     return client, profile, settings_row, match_column, match_value
 
 
-def build_ui_settings(profile: dict, settings_row: dict):
+def build_ui_settings(profile: dict, settings_row: dict, user_id: str = LOCAL_USER_ID):
     """Keep the current frontend settings shape while using Supabase values."""
 
-    settings = load_local_settings()
+    settings = load_local_settings(user_id)
     settings.update(
         {
             field: settings_row.get(field, settings[field])
@@ -610,13 +705,16 @@ def build_ui_settings(profile: dict, settings_row: dict):
     return settings
 
 
-def load_local_settings():
+def load_local_settings(user_id: str = LOCAL_USER_ID):
     """Load the existing local settings fallback."""
 
-    if not os.path.exists(USER_SETTINGS_PATH):
-        ensure_local_user_files()
+    settings_path = local_user_settings_path(user_id)
 
-    with open(USER_SETTINGS_PATH, "r", encoding="utf-8") as file:
+    if not os.path.exists(settings_path):
+        username = TESTER_USERNAME if user_id == TESTER_USER_ID else LOCAL_USERNAME
+        ensure_local_user_files(user_id, username)
+
+    with open(settings_path, "r", encoding="utf-8") as file:
         local_settings = json.load(file)
 
     return {
@@ -625,10 +723,14 @@ def load_local_settings():
     }
 
 
-def save_local_settings(settings: dict):
+def save_local_settings(settings: dict, user_id: str = LOCAL_USER_ID):
     """Persist the existing local settings fallback."""
 
-    with open(USER_SETTINGS_PATH, "w", encoding="utf-8") as file:
+    settings_path = local_user_settings_path(user_id)
+    username = TESTER_USERNAME if user_id == TESTER_USER_ID else LOCAL_USERNAME
+    ensure_local_user_files(user_id, username)
+
+    with open(settings_path, "w", encoding="utf-8") as file:
         json.dump(settings, file, indent=2)
 
 
@@ -757,14 +859,19 @@ def analyze_image_endpoint(file: UploadFile = File(...)):
 def login(payload: LoginRequest):
     username = payload.username.strip()
 
-    if (
-        hmac.compare_digest(username, LOCAL_USERNAME) and
-        hmac.compare_digest(payload.password, LOCAL_PASSWORD)
-    ):
-        return {
-            "authenticated": True,
-            "username": username,
-        }
+    for account_username, account in LOCAL_ACCOUNTS.items():
+        if (
+            hmac.compare_digest(username, account_username)
+            and hmac.compare_digest(payload.password, account["password"])
+        ):
+            ensure_local_user_files(account["user_id"], account_username)
+
+            return {
+                "authenticated": True,
+                "username": account_username,
+                "user_id": account["user_id"],
+                "role": account["role"],
+            }
 
     raise HTTPException(status_code=401, detail="Invalid username or password")
 
@@ -788,13 +895,21 @@ def logout():
 # ================================================================
 
 @app.get("/settings")
-def get_settings():
+def get_settings(request: Request):
+    user_id = request_local_user_id(request)
+
+    if user_id == TESTER_USER_ID:
+        return {
+            "settings": load_local_settings(user_id),
+            "storage_mode": "local_user",
+        }
+
     try:
         _, profile, settings_row, _, _ = get_supabase_profile_and_settings()
-        settings = build_ui_settings(profile, settings_row)
+        settings = build_ui_settings(profile, settings_row, user_id)
         storage_mode = "supabase"
     except Exception:
-        settings = load_local_settings()
+        settings = load_local_settings(user_id)
         storage_mode = "local_fallback"
 
     return {
@@ -804,12 +919,20 @@ def get_settings():
 
 
 @app.post("/settings")
-def update_settings(payload: SettingsRequest):
+def update_settings(payload: SettingsRequest, request: Request):
+    user_id = request_local_user_id(request)
     requested_settings = {
-        **load_local_settings(),
+        **load_local_settings(user_id),
         **payload.model_dump(),
     }
-    save_local_settings(requested_settings)
+    save_local_settings(requested_settings, user_id)
+
+    if user_id == TESTER_USER_ID:
+        return {
+            "saved": True,
+            "settings": requested_settings,
+            "storage_mode": "local_user",
+        }
 
     try:
         client, profile, _, match_column, match_value = (
@@ -861,7 +984,7 @@ def update_settings(payload: SettingsRequest):
             if updated_profiles:
                 profile = updated_profiles[0]
 
-        settings = build_ui_settings(profile, updated_rows[0])
+        settings = build_ui_settings(profile, updated_rows[0], user_id)
         storage_mode = "supabase"
     except Exception:
         settings = requested_settings
@@ -1144,7 +1267,7 @@ def supabase_restored_photo(photo_id: UUID):
 
 
 @app.post("/supabase/inspection/{inspection_id}/restore")
-def restore_supabase_inspection(inspection_id: UUID):
+def restore_supabase_inspection(inspection_id: UUID, request: Request):
     """Restore a cloud mirror into the existing local session format."""
 
     cloud_data = supabase_inspection_recovery(inspection_id)
@@ -1255,7 +1378,7 @@ def restore_supabase_inspection(inspection_id: UUID):
         "version": "1.0",
     }
     workflow.import_session(restored_session)
-    persist_session(inspection_id_text)
+    persist_session(inspection_id_text, request_local_user_id(request))
 
     return {
         "restored": True,
@@ -1455,7 +1578,7 @@ def set_context(payload: ContextRequest):
 
 
 @app.post("/workflow/observe")
-def observe(payload: ObservationRequest):
+def observe(payload: ObservationRequest, request: Request):
     """
     Submit an inspector observation into the co-pilot workflow.
 
@@ -1483,7 +1606,7 @@ def observe(payload: ObservationRequest):
         payload.session_id,
         result["issue"],
     )
-    persist_session(payload.session_id)
+    persist_session(payload.session_id, request_local_user_id(request))
     return result
 
 
@@ -1492,7 +1615,7 @@ def observe(payload: ObservationRequest):
 # ================================================================
 
 @app.post("/workflow/follow-up")
-def answer_follow_up(payload: FollowUpRequest):
+def answer_follow_up(payload: FollowUpRequest, request: Request):
     """
     Submit answer to a smart follow-up question.
 
@@ -1504,7 +1627,7 @@ def answer_follow_up(payload: FollowUpRequest):
         issue_id=payload.issue_id,
         answer=payload.answer,
     )
-    persist_session(payload.session_id)
+    persist_session(payload.session_id, request_local_user_id(request))
     return result
 
 
@@ -1567,6 +1690,7 @@ def mirror_photo(
 
 @app.post("/workflow/photo")
 def attach_photo(
+    request: Request,
     session_id: str = Form(...),
     issue_id: str = Form(...),
     photo: UploadFile = File(...),
@@ -1595,7 +1719,7 @@ def attach_photo(
         photo_url=photo_url,
         original_filename=original_filename,
     )
-    persist_session(session_id)
+    persist_session(session_id, request_local_user_id(request))
     result["photo_storage"] = mirror_photo(
         session_id,
         issue_id,
@@ -1625,7 +1749,7 @@ def get_confirmed(session_id: str):
 
 
 @app.post("/workflow/decisions")
-def process_decisions(payload: DecisionRequest):
+def process_decisions(payload: DecisionRequest, request: Request):
     """
     Approve, reject, or override pending findings.
 
@@ -1642,7 +1766,7 @@ def process_decisions(payload: DecisionRequest):
         payload.session_id,
         decisions,
     )
-    persist_session(payload.session_id)
+    persist_session(payload.session_id, request_local_user_id(request))
     result["decision_storage"] = mirror_decisions(
         payload.session_id,
         decisions,
@@ -1657,7 +1781,7 @@ def process_decisions(payload: DecisionRequest):
 # ================================================================
 
 @app.get("/workflow/coverage/{session_id}")
-def coverage(session_id: str):
+def coverage(session_id: str, request: Request):
     """
     Run coverage check.
 
@@ -1665,7 +1789,7 @@ def coverage(session_id: str):
     """
 
     result = workflow.run_coverage_check(session_id)
-    persist_session(session_id)
+    persist_session(session_id, request_local_user_id(request))
     return result
 
 

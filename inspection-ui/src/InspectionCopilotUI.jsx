@@ -327,6 +327,7 @@ const [settings, setSettings] = useState({
   const areaRef = useRef(area)
   const componentRef = useRef(component)
   const activeIssueRef = useRef(activeIssue)
+  const currentUserRef = useRef(currentUser)
   const voiceModeRef = useRef("observation")
   const photoInputRef = useRef(null)
   const storedAuthRef = useRef(storedAuth)
@@ -346,6 +347,21 @@ const [settings, setSettings] = useState({
     }
   }
 
+  const apiFetch = (path, options = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+    }
+
+    if (currentUserRef.current) {
+      headers["X-Local-User"] = currentUserRef.current
+    }
+
+    return fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    })
+  }
+
 
   /*****************************************************************/
   /* 6. APPLICATION LIFECYCLE */
@@ -355,6 +371,10 @@ const [settings, setSettings] = useState({
   useEffect(() => {
     sessionIdRef.current = sessionId
   }, [sessionId])
+
+  useEffect(() => {
+    currentUserRef.current = currentUser
+  }, [currentUser])
 
 
   // Keep current area ref synced for voice/backend submissions.
@@ -758,7 +778,7 @@ const [settings, setSettings] = useState({
 
   // Creates a new inspection session on the FastAPI backend.
   const createSession = async (title = "Untitled Inspection") => {
-    const res = await fetch(`${API_BASE}/workflow/session`, {
+    const res = await apiFetch("/workflow/session", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -786,8 +806,8 @@ const [settings, setSettings] = useState({
     try {
       setTitleSaving(true)
 
-      const response = await fetch(
-        `${API_BASE}/workflow/session/${sessionIdRef.current}/title`,
+      const response = await apiFetch(
+        `/workflow/session/${sessionIdRef.current}/title`,
         {
           method: "POST",
           headers: {
@@ -1229,7 +1249,7 @@ const [settings, setSettings] = useState({
     setLoading(true)
 
     try {
-      await fetch(`${API_BASE}/workflow/context`, {
+      await apiFetch("/workflow/context", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1246,7 +1266,7 @@ const [settings, setSettings] = useState({
         }),
       })
 
-      const res = await fetch(`${API_BASE}/workflow/observe`, {
+      const res = await apiFetch("/workflow/observe", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1291,7 +1311,7 @@ const [settings, setSettings] = useState({
 
     if (!sessionIdRef.current || !issue || !answerToSubmit.trim()) return
 
-    const res = await fetch(`${API_BASE}/workflow/follow-up`, {
+    const res = await apiFetch("/workflow/follow-up", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1397,7 +1417,7 @@ const [settings, setSettings] = useState({
       formData.append("issue_id", activeIssueRef.current.id)
       formData.append("photo", file)
 
-      const res = await fetch(`${API_BASE}/workflow/photo`, {
+      const res = await apiFetch("/workflow/photo", {
         method: "POST",
         body: formData,
       })
@@ -1472,7 +1492,7 @@ const applyPriorityOverride = async (score = overrideScore) => {
     return
   }
 
-  const res = await fetch(`${API_BASE}/workflow/decisions`, {
+  const res = await apiFetch("/workflow/decisions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1558,7 +1578,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
       return
     }
 
-    const response = await fetch(`${API_BASE}/workflow/decisions`, {
+    const response = await apiFetch("/workflow/decisions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1625,16 +1645,16 @@ const isPhotoRequiredBeforeApproval = (issue) => {
 
     setMode("complete")
 
-    const coverageRes = await fetch(
-      `${API_BASE}/workflow/coverage/${sessionIdRef.current}`
+    const coverageRes = await apiFetch(
+      `/workflow/coverage/${sessionIdRef.current}`
     )
     const coverageData = await coverageRes.json()
     markWorkflowSaved()
     setCoverage(coverageData)
     setCoverageReviewed(coverageData.missing_areas?.length === 0)
 
-    const reportRes = await fetch(
-      `${API_BASE}/workflow/report/${sessionIdRef.current}`
+    const reportRes = await apiFetch(
+      `/workflow/report/${sessionIdRef.current}`
     )
     const reportData = await reportRes.json()
     setReportBlocks(reportData.report_blocks || [])
@@ -1663,8 +1683,8 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     try {
       setSaveStatus(isAutoSave ? "Auto Saving..." : "Saving...")
 
-      const response = await fetch(
-        `${API_BASE}/workflow/session/${sessionIdRef.current}/save`,
+      const response = await apiFetch(
+        `/workflow/session/${sessionIdRef.current}/save`,
         {
           method: "POST",
         }
@@ -1701,8 +1721,8 @@ const isPhotoRequiredBeforeApproval = (issue) => {
 
   const loadSavedSessions = async (checkRecovery = false) => {
     try {
-      const response = await fetch(
-        `${API_BASE}/workflow/sessions`
+      const response = await apiFetch(
+        "/workflow/sessions"
       )
 
       const data = await response.json()
@@ -1733,8 +1753,8 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     successMessage = "Inspection session loaded successfully."
   ) => {
     try {
-      const response = await fetch(
-        `${API_BASE}/workflow/session/${sessionToLoad}/load`
+      const response = await apiFetch(
+        `/workflow/session/${sessionToLoad}/load`
       )
 
       const data = await response.json()
@@ -1810,8 +1830,8 @@ const isPhotoRequiredBeforeApproval = (issue) => {
       setCloudRestoreLoading(true)
       setCloudRestoreStatus("")
 
-      const response = await fetch(
-        `${API_BASE}/supabase/inspection/${encodeURIComponent(inspectionId)}/restore`,
+      const response = await apiFetch(
+        `/supabase/inspection/${encodeURIComponent(inspectionId)}/restore`,
         {
           method: "POST",
         }
@@ -1987,7 +2007,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
   // Logs out of local mode and hides session-specific panels.
   const logout = async () => {
     try {
-      await fetch(`${API_BASE}/auth/logout`, {
+      await apiFetch("/auth/logout", {
         method: "POST",
       })
     } catch {
@@ -2033,7 +2053,7 @@ const loadSettings = async () => {
     setSettingsLoading(true)
     setSettingsStatus("Loading settings...")
 
-    const response = await fetch(`${API_BASE}/settings`)
+    const response = await apiFetch("/settings")
     const data = await response.json()
 
       if (data.settings) {
@@ -2069,7 +2089,7 @@ const saveSettings = async () => {
     setSettingsLoading(true)
     setSettingsStatus("Saving settings...")
 
-    const response = await fetch(`${API_BASE}/settings`, {
+    const response = await apiFetch("/settings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -3285,128 +3305,130 @@ useLayoutEffect(() => {
               </div>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                    QA / Testing
-                  </p>
-                  <h3 className="font-bold text-slate-900">
-                    Diagnostics
-                  </h3>
+            {currentUser !== "tester" && (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                      QA / Testing
+                    </p>
+                    <h3 className="font-bold text-slate-900">
+                      Diagnostics
+                    </h3>
+                  </div>
+
+                  <button
+                    onClick={() => setShowDiagnosticsPanel((value) => !value)}
+                    className={compactSecondaryButtonClass}
+                  >
+                    {showDiagnosticsPanel ? "Hide Diagnostics" : "Show Diagnostics"}
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => setShowDiagnosticsPanel((value) => !value)}
-                  className={compactSecondaryButtonClass}
-                >
-                  {showDiagnosticsPanel ? "Hide Diagnostics" : "Show Diagnostics"}
-                </button>
+                {showDiagnosticsPanel && (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Frontend Version
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                          {FRONTEND_VERSION}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Backend URL
+                        </p>
+                        <p className="mt-1 break-all font-semibold text-slate-700 dark:text-slate-100">
+                          {API_BASE}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Backend Health
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                          {diagnosticsStatus.backendHealth}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Supabase Health
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                          {diagnosticsStatus.supabaseHealth}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Current Inspection ID
+                        </p>
+                        <p className="mt-1 break-all font-semibold text-slate-700 dark:text-slate-100">
+                          {sessionId || "No active session"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Current User
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                          {currentUser || "Not signed in"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900 md:col-span-2">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Current Storage Mode
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                          {diagnosticsStatus.currentStorageMode || settingsStorageMode}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900 md:col-span-2">
+                        <p className="text-xs font-bold uppercase text-slate-400">
+                          Photo Upload Test
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
+                          {diagnosticsStatus.photoUpload}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={testBackendHealth}
+                        disabled={diagnosticsLoading === "backend"}
+                        className={compactPrimaryButtonClass}
+                      >
+                        {diagnosticsLoading === "backend" ? "Testing..." : "Test Backend"}
+                      </button>
+
+                      <button
+                        onClick={testSupabaseHealth}
+                        disabled={diagnosticsLoading === "supabase"}
+                        className={compactPrimaryButtonClass}
+                      >
+                        {diagnosticsLoading === "supabase" ? "Testing..." : "Test Supabase"}
+                      </button>
+
+                      <button
+                        onClick={testPhotoUpload}
+                        className={compactSecondaryButtonClass}
+                      >
+                        Test Photo Upload
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-
-              {showDiagnosticsPanel && (
-                <div className="mt-4 space-y-4">
-                  <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Frontend Version
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
-                        {FRONTEND_VERSION}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Backend URL
-                      </p>
-                      <p className="mt-1 break-all font-semibold text-slate-700 dark:text-slate-100">
-                        {API_BASE}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Backend Health
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
-                        {diagnosticsStatus.backendHealth}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Supabase Health
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
-                        {diagnosticsStatus.supabaseHealth}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Current Inspection ID
-                      </p>
-                      <p className="mt-1 break-all font-semibold text-slate-700 dark:text-slate-100">
-                        {sessionId || "No active session"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Current User
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
-                        {currentUser || "Not signed in"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900 md:col-span-2">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Current Storage Mode
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
-                        {diagnosticsStatus.currentStorageMode || settingsStorageMode}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white p-3 dark:bg-slate-900 md:col-span-2">
-                      <p className="text-xs font-bold uppercase text-slate-400">
-                        Photo Upload Test
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700 dark:text-slate-100">
-                        {diagnosticsStatus.photoUpload}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      onClick={testBackendHealth}
-                      disabled={diagnosticsLoading === "backend"}
-                      className={compactPrimaryButtonClass}
-                    >
-                      {diagnosticsLoading === "backend" ? "Testing..." : "Test Backend"}
-                    </button>
-
-                    <button
-                      onClick={testSupabaseHealth}
-                      disabled={diagnosticsLoading === "supabase"}
-                      className={compactPrimaryButtonClass}
-                    >
-                      {diagnosticsLoading === "supabase" ? "Testing..." : "Test Supabase"}
-                    </button>
-
-                    <button
-                      onClick={testPhotoUpload}
-                      className={compactSecondaryButtonClass}
-                    >
-                      Test Photo Upload
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
 
             <div className="mt-5 flex flex-wrap justify-end gap-3">
               <button
