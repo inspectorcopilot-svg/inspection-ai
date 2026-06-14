@@ -99,13 +99,14 @@ app.add_middleware(
 
 LOCAL_USER_ID = "local_user"
 TESTER_USER_ID = "tester"
+FIELD_TESTER_USER_IDS = ("tester", "tester2", "tester3")
 USER_ROOT_DIR = "users"
 TESTER_TEMP_PASSWORD = "TestPilot2026!"
 
 
 def local_user_dir(user_id: str) -> str:
-    if user_id == TESTER_USER_ID:
-        return "tester_storage"
+    if user_id in FIELD_TESTER_USER_IDS:
+        return f"{user_id}_storage"
 
     return os.path.join(USER_ROOT_DIR, user_id)
 
@@ -123,8 +124,8 @@ def local_user_settings_path(user_id: str) -> str:
 
 
 def local_user_config_path(user_id: str) -> str:
-    if user_id == TESTER_USER_ID:
-        return os.path.join(USER_ROOT_DIR, TESTER_USER_ID, "pilot_config.json")
+    if user_id in FIELD_TESTER_USER_IDS:
+        return os.path.join(USER_ROOT_DIR, user_id, "pilot_config.json")
 
     return os.path.join(local_user_dir(user_id), "pilot_config.json")
 
@@ -135,7 +136,8 @@ USER_SETTINGS_PATH = local_user_settings_path(LOCAL_USER_ID)
 PILOT_CONFIG_PATH = local_user_config_path(LOCAL_USER_ID)
 
 os.makedirs(USER_INSPECTION_DIR, exist_ok=True)
-os.makedirs(local_user_inspection_dir(TESTER_USER_ID), exist_ok=True)
+for field_tester_id in FIELD_TESTER_USER_IDS:
+    os.makedirs(local_user_inspection_dir(field_tester_id), exist_ok=True)
 
 
 def load_local_credentials():
@@ -159,27 +161,37 @@ def load_local_credentials():
 LOCAL_USERNAME, LOCAL_PASSWORD = load_local_credentials()
 
 
-def load_tester_credentials():
+def load_tester_credentials(user_id: str):
     """Load field-tester credentials with a local temporary fallback."""
 
-    tester_config_path = local_user_config_path(TESTER_USER_ID)
+    tester_config_path = local_user_config_path(user_id)
+    env_suffix = "" if user_id == TESTER_USER_ID else user_id.replace("tester", "TESTER")
+    username_env = (
+        "INSPECTION_COPILOT_TESTER_USERNAME"
+        if user_id == TESTER_USER_ID
+        else f"INSPECTION_COPILOT_{env_suffix}_USERNAME"
+    )
+    password_env = (
+        "INSPECTION_COPILOT_TESTER_PASSWORD"
+        if user_id == TESTER_USER_ID
+        else f"INSPECTION_COPILOT_{env_suffix}_PASSWORD"
+    )
 
     if os.path.exists(tester_config_path):
         with open(tester_config_path, "r", encoding="utf-8") as file:
             config = json.load(file)
 
         return (
-            config.get("username", "tester"),
+            config.get("username", user_id),
             config.get("password", TESTER_TEMP_PASSWORD),
         )
 
     return (
-        os.getenv("INSPECTION_COPILOT_TESTER_USERNAME", "tester"),
-        os.getenv("INSPECTION_COPILOT_TESTER_PASSWORD", TESTER_TEMP_PASSWORD),
+        os.getenv(username_env, user_id),
+        os.getenv(password_env, TESTER_TEMP_PASSWORD),
     )
 
 
-TESTER_USERNAME, TESTER_PASSWORD = load_tester_credentials()
 LOCAL_ACCOUNTS = {
     LOCAL_USERNAME: {
         "password": LOCAL_PASSWORD,
@@ -187,13 +199,16 @@ LOCAL_ACCOUNTS = {
         "display_name": "Local Inspector",
         "role": "owner",
     },
-    TESTER_USERNAME: {
-        "password": TESTER_PASSWORD,
-        "user_id": TESTER_USER_ID,
-        "display_name": "Field Tester",
-        "role": "tester",
-    },
 }
+
+for field_tester_id in FIELD_TESTER_USER_IDS:
+    tester_username, tester_password = load_tester_credentials(field_tester_id)
+    LOCAL_ACCOUNTS[tester_username] = {
+        "password": tester_password,
+        "user_id": field_tester_id,
+        "display_name": f"Field Tester {field_tester_id.removeprefix('tester')}".strip(),
+        "role": "tester",
+    }
 
 
 def local_user_id_from_username(username: str) -> str:
@@ -256,7 +271,10 @@ def ensure_local_user_files(user_id: str = LOCAL_USER_ID, username: str = LOCAL_
     os.makedirs(inspection_dir, exist_ok=True)
 
     if not os.path.exists(profile_path):
-        display_name = "Field Tester" if user_id == TESTER_USER_ID else "Local Inspector"
+        display_name = (
+            LOCAL_ACCOUNTS.get(username, {}).get("display_name")
+            or "Local Inspector"
+        )
 
         with open(profile_path, "w", encoding="utf-8") as file:
             json.dump(
@@ -711,7 +729,7 @@ def load_local_settings(user_id: str = LOCAL_USER_ID):
     settings_path = local_user_settings_path(user_id)
 
     if not os.path.exists(settings_path):
-        username = TESTER_USERNAME if user_id == TESTER_USER_ID else LOCAL_USERNAME
+        username = user_id if user_id in FIELD_TESTER_USER_IDS else LOCAL_USERNAME
         ensure_local_user_files(user_id, username)
 
     with open(settings_path, "r", encoding="utf-8") as file:
@@ -727,7 +745,7 @@ def save_local_settings(settings: dict, user_id: str = LOCAL_USER_ID):
     """Persist the existing local settings fallback."""
 
     settings_path = local_user_settings_path(user_id)
-    username = TESTER_USERNAME if user_id == TESTER_USER_ID else LOCAL_USERNAME
+    username = user_id if user_id in FIELD_TESTER_USER_IDS else LOCAL_USERNAME
     ensure_local_user_files(user_id, username)
 
     with open(settings_path, "w", encoding="utf-8") as file:
@@ -898,7 +916,7 @@ def logout():
 def get_settings(request: Request):
     user_id = request_local_user_id(request)
 
-    if user_id == TESTER_USER_ID:
+    if user_id in FIELD_TESTER_USER_IDS:
         return {
             "settings": load_local_settings(user_id),
             "storage_mode": "local_user",
@@ -927,7 +945,7 @@ def update_settings(payload: SettingsRequest, request: Request):
     }
     save_local_settings(requested_settings, user_id)
 
-    if user_id == TESTER_USER_ID:
+    if user_id in FIELD_TESTER_USER_IDS:
         return {
             "saved": True,
             "settings": requested_settings,

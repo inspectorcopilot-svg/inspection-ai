@@ -15,7 +15,7 @@ issue_photos/
 saved_sessions/
 temp_uploads/
 users/
-tester_storage/
+tester*_storage/
 
 # Python virtual environments
 venv/

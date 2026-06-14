@@ -105,6 +105,7 @@ const badgeStyles = {
 
 const TUTORIAL_STORAGE_KEY = "inspection-copilot-tutorial-complete"
 const AUTH_STORAGE_KEY = "inspection-copilot-local-auth"
+const DEFAULT_FIELD_TESTER_USERNAMES = ["tester", "tester2", "tester3"]
 
 const readStoredAuth = () => {
   try {
@@ -118,6 +119,10 @@ const clearStoredAuthSession = () => {
   localStorage.removeItem(AUTH_STORAGE_KEY)
   sessionStorage.removeItem(AUTH_STORAGE_KEY)
 }
+
+const storedAuthRole = (storedAuth) =>
+  storedAuth?.role ||
+  (DEFAULT_FIELD_TESTER_USERNAMES.includes(storedAuth?.username) ? "tester" : null)
 
 const TUTORIAL_STEPS = [
   {
@@ -263,6 +268,7 @@ const [loginUsername, setLoginUsername] = useState("")
 const [loginPassword, setLoginPassword] = useState("")
 const [loginError, setLoginError] = useState("")
 const [currentUser, setCurrentUser] = useState(storedAuth?.username || null)
+const [currentUserRole, setCurrentUserRole] = useState(storedAuthRole(storedAuth))
 const [showProfileMenu, setShowProfileMenu] = useState(false)
 const [showProfilePanel, setShowProfilePanel] = useState(false)
 const [tutorialStep, setTutorialStep] = useState(null)
@@ -510,11 +516,12 @@ const [settings, setSettings] = useState({
       JSON.stringify({
         authenticated: true,
         username: currentUser || "local_user",
+        role: currentUserRole,
         session_id: sessionId,
         inspection_title: inspectionTitle,
       })
     )
-  }, [isAuthenticated, currentUser, sessionId, inspectionTitle])
+  }, [isAuthenticated, currentUser, currentUserRole, sessionId, inspectionTitle])
 
 
   /*****************************************************************/
@@ -1391,11 +1398,12 @@ const [settings, setSettings] = useState({
       localStorage.setItem(
         AUTH_STORAGE_KEY,
         JSON.stringify({
-          authenticated: true,
-          username: currentUser || "local_user",
-          session_id: sessionIdRef.current,
-          inspection_title: inspectionTitle,
-        })
+        authenticated: true,
+        username: currentUser || "local_user",
+        role: currentUserRole,
+        session_id: sessionIdRef.current,
+        inspection_title: inspectionTitle,
+      })
       )
     }
 
@@ -1982,11 +1990,14 @@ const isPhotoRequiredBeforeApproval = (issue) => {
       if (data.authenticated) {
         setIsAuthenticated(true)
         setCurrentUser(data.username)
+        setCurrentUserRole(data.role || null)
+        currentUserRef.current = data.username
         localStorage.setItem(
           AUTH_STORAGE_KEY,
           JSON.stringify({
             authenticated: true,
             username: data.username,
+            role: data.role || null,
             session_id: sessionIdRef.current,
             inspection_title: inspectionTitle,
           })
@@ -2017,6 +2028,7 @@ const isPhotoRequiredBeforeApproval = (issue) => {
     clearStoredAuthSession()
     setIsAuthenticated(false)
     setCurrentUser(null)
+    setCurrentUserRole(null)
     setLoginUsername("")
     setLoginPassword("")
     setShowLoadPanel(false)
@@ -3305,7 +3317,7 @@ useLayoutEffect(() => {
               </div>
             </div>
 
-            {currentUser !== "tester" && (
+            {currentUserRole !== "tester" && (
               <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
